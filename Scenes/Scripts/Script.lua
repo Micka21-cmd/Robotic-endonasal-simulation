@@ -8,6 +8,9 @@ local projectRoot =
 local Config = dofile(projectRoot .. '/src/config.lua')
 local config = Config.create(projectRoot)
 
+local Robot = dofile(projectRoot .. '/src/robot.lua')
+local robotModel
+
 local exportDir = config.exportDir
 local runLabel = config.runLabel
 
@@ -45,19 +48,6 @@ local function norm(v)
     return math.sqrt(v[1]^2 + v[2]^2 + v[3]^2)
 end
 
-local function readConfiguration()
-    local q = {}
-    for i = 1, 6 do
-        q[i] = sim.getJointPosition(joints[i])
-    end
-    return q
-end
-
-local function setConfiguration(q)
-    for i = 1, 6 do
-        sim.setJointPosition(joints[i], q[i])
-    end
-end
 
 local function abortTest(reason)
     running = false
@@ -123,7 +113,7 @@ end
 
 
 local function recordAcceptedState(attempts)
-    local q = readConfiguration()
+    local q = robotModel:readConfiguration()
     local p = sim.getObjectPosition(tip, anatomy)
     local pd = sim.getObjectPosition(target, anatomy)
     local rcm, tipError, clearance, _, collision = measureState()
@@ -281,9 +271,10 @@ function sysCall_init()
     wall = sim.getObject('/Anatomy_V0/Corridor_wall')
     initialAnatomyPose = sim.getObjectPose(anatomy, sim.handle_world)
 
-    for i = 1, 6 do
-        joints[i] = sim.getObject('../joint', {index = i - 1})
-    end
+    robotModel = Robot.new(sim, robot, '../joint', 6)
+
+    -- Shared joint handles used by the existing IK setup.
+    joints = robotModel.joints
 
     savedDynamics = sim.getBoolParam(
         sim.boolparam_dynamics_handling_enabled
@@ -353,7 +344,7 @@ end
 function sysCall_actuation()
     if not running then return end
 
-    local previousQ = readConfiguration()
+    local previousQ = robotModel:readConfiguration()
     local previousTarget = sim.getObjectPose(target, sim.handle_world)
 
     local advance = sim.getSimulationTimeStep()
@@ -450,11 +441,11 @@ function sysCall_actuation()
     slowdownReported = attemptsUsed > 1
 
     -- Appliquer provisoirement pour mesurer la geometrie obtenue.
-    setConfiguration(candidate)
+    robotModel:setConfiguration(candidate)
     local valid, reason = validateState()
 
     if not valid then
-        setConfiguration(previousQ)
+        robotModel:setConfiguration(previousQ)
         sim.setObjectPose(target, previousTarget, sim.handle_world)
         abortTest(reason)
         return
