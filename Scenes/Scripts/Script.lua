@@ -1,12 +1,15 @@
 sim = require 'sim'
 simIK = require 'simIK'
 
+-- Local checkout location. Adapt this path when moving the repository.
+local projectRoot =
+    'C:/Users/Micka/Documents/GitHub/Robotic-endonasal-simulation'
 
--- Chemin export CSV
-local exportDir = 'C:/Users/Micka/Documents/Simulation chirurgicale/Results'
+local Config = dofile(projectRoot .. '/src/config.lua')
+local config = Config.create(projectRoot)
 
--- Le script actuel execute T0 -> T1 dans l'implantation B.
-local runLabel = 'V0_B_T1'
+local exportDir = config.exportDir
+local runLabel = config.runLabel
 
 local dataRows = {}
 local replayTime = 0
@@ -21,11 +24,11 @@ local savedDynamics, savedTargetPose
 local running = false
 local elapsed = 0
 
-local duration = 16
-local maxRcmError = 0.0001   -- 0,1 mm
-local maxTipError = 0.0005   -- 0,5 mm
-local minClearance = 0.001  -- 1 mm
-local maxJointStep = math.rad(0.5)
+local duration = config.duration
+local maxRcmError = config.maxRcmError
+local maxTipError = config.maxTipError
+local minClearance = config.minClearance
+local maxJointStep = config.maxJointStep
 
 local worstRcm = 0
 local worstTip = 0
@@ -304,7 +307,11 @@ function sysCall_init()
     ikEnv = simIK.createEnvironment()
     ikGroup = simIK.createGroup(ikEnv)
     simIK.setGroupCalculation(
-        ikEnv, ikGroup, simIK.method_damped_least_squares, 0.01, 100
+        ikEnv,
+        ikGroup,
+        simIK.method_damped_least_squares,
+        config.ikDamping,
+        config.ikMaxIterations
     )
 
     local element
@@ -317,7 +324,13 @@ function sysCall_init()
 
     -- Tolerances IK plus fines que les criteres du test.
     simIK.setElementPrecision(
-        ikEnv, ikGroup, element, {0.00001, math.rad(0.01)}
+        ikEnv,
+        ikGroup,
+        element,
+        {
+            config.ikPositionTolerance,
+            config.ikOrientationTolerance
+        }
     )
 
     for i = 1, 6 do
@@ -352,7 +365,7 @@ function sysCall_actuation()
 
     -- Jusqu'a 8 essais, en divisant la progression par deux.
     -- Le robot reste dans previousQ pendant ces calculs.
-    for attempt = 1, 8 do
+    for attempt = 1, config.maxIkAttempts do
         attemptsUsed = attempt
         nextTime = math.min(duration, elapsed + advance)
 
