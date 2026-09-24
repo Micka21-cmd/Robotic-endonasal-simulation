@@ -10,9 +10,13 @@ local config = Config.create(projectRoot)
 
 local Robot = dofile(projectRoot .. '/src/robot.lua')
 local robotModel
+local RunDirectory = dofile(projectRoot .. '/src/run_directory.lua')
+local runStartedAt
 
 local exportDir = config.exportDir
 local runLabel = config.runLabel
+method = 'prescribed_motion_ik',
+runNote = 'T0 to T1 verification after robot module extraction',
 
 local dataRows = {}
 local replayTime = 0
@@ -192,17 +196,13 @@ local function fileExists(path)
 end
 
 local function exportRun()
-    local base = exportDir .. '/' .. runLabel .. '_'
-        .. os.date('%Y%m%d_%H%M%S')
+    local runDir, runId = RunDirectory.create(
+        exportDir,
+        runLabel,
+        runStartedAt or os.time()
+    )
 
-    -- Eviter d'ecraser un essai precedent.
-    local stem = base
-    local suffix = 1
-    while fileExists(stem .. '_states.csv')
-       or fileExists(stem .. '_summary.csv') do
-        stem = base .. '_' .. suffix
-        suffix = suffix + 1
-    end
+    local stem = runDir .. '/' .. runLabel
 
     local header = {
         'sample', 'replay_time_s', 'progress_time_s', 'tau',
@@ -231,6 +231,17 @@ local function exportRun()
         {'max_joint_step_rad', maxJointStep},
         {'position_frame', 'Anatomy_V0'},
         {'dynamics_enabled_during_tracking', 0}
+        {'run_id', runId},
+        {'started_at_local', os.date(
+            '%Y-%m-%dT%H:%M:%S', runStartedAt or os.time()
+        )},
+        {'method', config.method},
+        {'run_note', config.runNote},
+        {'ik_damping', config.ikDamping},
+        {'ik_max_iterations', config.ikMaxIterations},
+        {'ik_position_tolerance_m', config.ikPositionTolerance},
+        {'ik_orientation_tolerance_rad', config.ikOrientationTolerance},
+        {'max_ik_attempts', config.maxIkAttempts},
     }
 
     -- Ne pas publier de faux extrema si aucun etat n'a ete accepte.
@@ -264,6 +275,7 @@ end
 
 function sysCall_init()
     local robot = sim.getObject('..')
+    runStartedAt = os.time()
     anatomy = sim.getObject('/Anatomy_V0')
     shaft = sim.getObject('/UR3/Instrument_shaft')
     tip = sim.getObject('/UR3/tool_tip')
