@@ -20,7 +20,7 @@ function Config.create(projectRoot)
 
         runLabel = 'V0_B_' .. targetName,
         method = 'prescribed_motion_ik',
-        runNote = 'T0 to T2 verification after export module extraction',
+        runNote = 'T0 to T2 verification after experiment module extraction',
 
         duration = 16,
 
