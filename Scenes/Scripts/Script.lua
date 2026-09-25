@@ -19,6 +19,9 @@ local runStartedAt
 
 local Trajectory = dofile(projectRoot .. '/src/trajectory.lua')
 
+local Validation = dofile(projectRoot .. '/src/validation.lua')
+local validator
+
 local exportDir = config.exportDir
 local runLabel = config.runLabel
 
@@ -116,10 +119,6 @@ local function validateState()
         return false, string.format('marge = %.4f mm.', 1000*distance)
     end
 
-    checks = checks + 1
-    worstRcm = math.max(worstRcm, rcm)
-    worstTip = math.max(worstTip, err)
-    smallestClearance = math.min(smallestClearance, distance)
     return true
 end
 
@@ -156,6 +155,12 @@ local function recordAcceptedState(attempts)
     row[#row + 1] = collision and 1 or 0
 
     dataRows[#dataRows + 1] = row
+
+    -- Update statistics only after recording an accepted state.
+    checks = checks + 1
+    worstRcm = math.max(worstRcm, rcm)
+    worstTip = math.max(worstTip, tipError)
+    smallestClearance = math.min(smallestClearance, clearance)
 end
 
 local function csvCell(value)
@@ -353,6 +358,23 @@ function sysCall_init()
     robotCollection = sim.createCollection(1)
     sim.addItemToCollection(robotCollection, sim.handle_tree, robot, 0)
 
+    validator = Validation.new(
+        sim,
+        robotModel,
+        {
+            anatomy = anatomy,
+            shaft = shaft,
+            tip = tip,
+            target = target,
+            wall = wall,
+            robotCollection = robotCollection
+        },
+        config
+    )
+
+    ikSolver = Kinematics.new(simIK, robotModel, config)
+    ikSolver:initialize(tip, target)
+
     ikSolver = Kinematics.new(simIK, robotModel, config)
     ikSolver:initialize(tip, target)
 
@@ -361,6 +383,7 @@ function sysCall_init()
         abortTest(reason)
         return
     end
+
 
     running = true
     recordAcceptedState(0)
@@ -403,40 +426,16 @@ function sysCall_actuation()
         local flags
         candidate, flags = ikSolver:solveCandidate()
 
-        if candidate ~= nil then
-            local acceptable = true
-
-            for i = 1, 6 do
-                local cyclic, interval = sim.getJointInterval(joints[i])
-
-                local withinLimits = cyclic or (
-                    candidate[i] >= interval[1] - 1e-9 and
-                    candidate[i] <= interval[1] + interval[2] + 1e-9
-                )
-
-                local delta = math.abs(candidate[i] - previousQ[i])
-
-                if not withinLimits then
-                    acceptable = false
-                    lastReason = string.format(
-                        'Joint limit exceeded at J%d', i
-                    )
-                    break
-                elseif delta > maxJointStep then
-                    acceptable = false
-                    lastReason = string.format(
-                        'Joint increment at J%d = %.6f deg',
-                        i,
-                        math.deg(delta)
-                    )
-                    break
-                end
-            end
+            if candidate ~= nil then
+                local acceptable, reason =
+                validator:checkJoints(candidate, previousQ)
 
             if acceptable then
                 accepted = true
                 break
             end
+
+            lastReason = reason
         else
             lastReason = 'IK failed, flags=' .. tostring(flags)
         end
@@ -464,8 +463,10 @@ function sysCall_actuation()
     end
     slowdownReported = attemptsUsed > 1
 
-    -- Appliquer provisoirement pour mesurer la geometrie obtenue.
+
+    -- Apply the candidate temporarily to check its geometry.
     robotModel:setConfiguration(candidate)
+
     local valid, reason = validateState()
 
     if not valid then
