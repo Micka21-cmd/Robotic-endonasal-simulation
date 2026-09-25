@@ -8,7 +8,7 @@ function Config.create(projectRoot)
         exportDir = projectRoot .. '/Results',
         runLabel = 'V0_B_T1',
         method = 'prescribed_motion_ik',
-        runNote = 'T0 to T1 verification after robot module extraction',
+        runNote = 'T0 to T1 verification after IK module extraction',
 
         duration = 16,
 

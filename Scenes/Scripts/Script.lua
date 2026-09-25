@@ -10,13 +10,16 @@ local config = Config.create(projectRoot)
 
 local Robot = dofile(projectRoot .. '/src/robot.lua')
 local robotModel
+
+local Kinematics = dofile(projectRoot .. '/src/kinematics.lua')
+local ikSolver
+
 local RunDirectory = dofile(projectRoot .. '/src/run_directory.lua')
 local runStartedAt
 
 local exportDir = config.exportDir
 local runLabel = config.runLabel
-method = 'prescribed_motion_ik',
-runNote = 'T0 to T1 verification after robot module extraction',
+
 
 local dataRows = {}
 local replayTime = 0
@@ -26,7 +29,6 @@ local initialAnatomyPose
 
 local joints = {}
 local anatomy, shaft, tip, target, wall, robotCollection
-local ikEnv, ikGroup, jointMap
 local savedDynamics, savedTargetPose
 local running = false
 local elapsed = 0
@@ -230,7 +232,7 @@ local function exportRun()
         {'min_clearance_allowed_m', minClearance},
         {'max_joint_step_rad', maxJointStep},
         {'position_frame', 'Anatomy_V0'},
-        {'dynamics_enabled_during_tracking', 0}
+        {'dynamics_enabled_during_tracking', 0},
         {'run_id', runId},
         {'started_at_local', os.date(
             '%Y-%m-%dT%H:%M:%S', runStartedAt or os.time()
@@ -307,40 +309,8 @@ function sysCall_init()
     robotCollection = sim.createCollection(1)
     sim.addItemToCollection(robotCollection, sim.handle_tree, robot, 0)
 
-    ikEnv = simIK.createEnvironment()
-    ikGroup = simIK.createGroup(ikEnv)
-    simIK.setGroupCalculation(
-        ikEnv,
-        ikGroup,
-        simIK.method_damped_least_squares,
-        config.ikDamping,
-        config.ikMaxIterations
-    )
-
-    local element
-    -- Contraindre la position et la direction de la tige.
-    -- Laisser libre la rotation autour de son axe Z.
-    element, jointMap = simIK.addElementFromScene(
-        ikEnv, ikGroup, robot, tip, target,
-        simIK.constraint_position + simIK.constraint_alpha_beta
-    )
-
-    -- Tolerances IK plus fines que les criteres du test.
-    simIK.setElementPrecision(
-        ikEnv,
-        ikGroup,
-        element,
-        {
-            config.ikPositionTolerance,
-            config.ikOrientationTolerance
-        }
-    )
-
-    for i = 1, 6 do
-        simIK.setJointMode(
-            ikEnv, jointMap[joints[i]], simIK.jointmode_ik
-        )
-    end
+    ikSolver = Kinematics.new(simIK, robotModel, config)
+    ikSolver:initialize(tip, target)
 
     local valid, reason = validateState()
     if not valid then
@@ -386,19 +356,15 @@ function sysCall_actuation()
 
         -- Repartir de la configuration du robot, toujours inchangee,
         -- y compris apres un essai IK rejete.
-        simIK.syncFromSim(ikEnv, {ikGroup})
-        local result, flags = simIK.handleGroup(ikEnv, ikGroup)
+        local flags
+        candidate, flags = ikSolver:solveCandidate()
 
-        if result == simIK.result_success then
-            candidate = {}
+        if candidate ~= nil then
             local acceptable = true
 
             for i = 1, 6 do
-                candidate[i] = simIK.getJointPosition(
-                    ikEnv, jointMap[joints[i]]
-                )
-
                 local cyclic, interval = sim.getJointInterval(joints[i])
+
                 local withinLimits = cyclic or (
                     candidate[i] >= interval[1] - 1e-9 and
                     candidate[i] <= interval[1] + interval[2] + 1e-9
@@ -409,13 +375,15 @@ function sysCall_actuation()
                 if not withinLimits then
                     acceptable = false
                     lastReason = string.format(
-                        'limite articulaire J%d', i
+                        'Joint limit exceeded at J%d', i
                     )
                     break
                 elseif delta > maxJointStep then
                     acceptable = false
                     lastReason = string.format(
-                        'pas J%d = %.6f deg', i, math.deg(delta)
+                        'Joint increment at J%d = %.6f deg',
+                        i,
+                        math.deg(delta)
                     )
                     break
                 end
@@ -426,7 +394,7 @@ function sysCall_actuation()
                 break
             end
         else
-            lastReason = 'echec IK, flags=' .. tostring(flags)
+            lastReason = 'IK failed, flags=' .. tostring(flags)
         end
 
         advance = advance / 2
@@ -434,7 +402,7 @@ function sysCall_actuation()
 
     if not accepted then
         sim.setObjectPose(target, previousTarget, sim.handle_world)
-        simIK.syncFromSim(ikEnv, {ikGroup})
+        ikSolver:syncFromScene()
 
         abortTest(string.format(
             'progression adaptative epuisee a t=%.6f s : %s',
@@ -494,8 +462,8 @@ function sysCall_actuation()
 end
 
 function sysCall_cleanup()
-    if ikEnv then
-        simIK.eraseEnvironment(ikEnv)
+    if ikSolver then
+        ikSolver:destroy()
     end
     if robotCollection then
         sim.destroyCollection(robotCollection)
