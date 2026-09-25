@@ -4,11 +4,23 @@
 local Config = {}
 
 function Config.create(projectRoot)
+    local targetName = 'T1'
+
+    assert(
+        targetName == 'T1' or targetName == 'T2',
+        'Unsupported target name'
+    )
+
     return {
         exportDir = projectRoot .. '/Results',
-        runLabel = 'V0_B_T1',
+
+        targetName = targetName,
+        targetPath = '/Anatomy_V0/target_' .. targetName,
+        startPosition = {0, 0, 0.075},
+
+        runLabel = 'V0_B_' .. targetName,
         method = 'prescribed_motion_ik',
-        runNote = 'T0 to T1 verification after trajectory module extraction',
+        runNote = 'Verification of centralized target selection',
 
         duration = 16,
 

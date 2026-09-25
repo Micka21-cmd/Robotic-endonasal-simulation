@@ -46,6 +46,10 @@ local worstTip = 0
 local smallestClearance = math.huge
 local checks = 0
 
+local goal
+local startPosition
+local goalPosition
+
 local slowdownReported = false
 
 local function message(text)
@@ -247,6 +251,24 @@ local function exportRun()
         {'ik_orientation_tolerance_rad', config.ikOrientationTolerance},
         {'max_ik_attempts', config.maxIkAttempts},
     }
+    summary[#summary + 1] = {'target_name', config.targetName}
+    summary[#summary + 1] = {'target_path', config.targetPath}
+
+    if startPosition and goalPosition then
+        local axes = {'x', 'y', 'z'}
+
+        for i = 1, 3 do
+            summary[#summary + 1] = {
+                'start_' .. axes[i] .. '_m',
+                startPosition[i]
+            }
+
+            summary[#summary + 1] = {
+                'goal_' .. axes[i] .. '_m',
+                goalPosition[i]
+            }
+        end
+    end
 
     -- Ne pas publier de faux extrema si aucun etat n'a ete accepte.
     if #dataRows > 0 then
@@ -285,6 +307,20 @@ function sysCall_init()
     tip = sim.getObject('/UR3/tool_tip')
     target = sim.getObject('/tool_target')
     wall = sim.getObject('/Anatomy_V0/Corridor_wall')
+    goal = sim.getObject(config.targetPath)
+
+    startPosition = {
+        config.startPosition[1],
+        config.startPosition[2],
+        config.startPosition[3]
+    }
+
+    goalPosition = sim.getObjectPosition(goal, anatomy)
+
+    assert(
+        startPosition[3] > 0 and goalPosition[3] > 0,
+        'Start and goal must have positive anatomical Z'
+    )
     initialAnatomyPose = sim.getObjectPose(anatomy, sim.handle_world)
 
     robotModel = Robot.new(sim, robot, '../joint', 6)
@@ -300,8 +336,14 @@ function sysCall_init()
 
     -- Controle du depart attendu : pointe en T0.
     local p = sim.getObjectPosition(tip, anatomy)
-    if norm({p[1], p[2], p[3] - 0.075}) > 0.0001 then
-        abortTest('la pointe ne se trouve pas en T0 au depart.')
+    local startError = norm({
+        p[1] - startPosition[1],
+        p[2] - startPosition[2],
+        p[3] - startPosition[3]
+    })
+
+    if startError > 0.0001 then
+        abortTest('Tool tip is not at T0 at initialization.')
         return
     end
 
@@ -322,7 +364,11 @@ function sysCall_init()
 
     running = true
     recordAcceptedState(0)
-    message('Depart valide. Test cinematique RCM : T0 -> T1 en 16 s.')
+    message(string.format(
+        'Valid start. Kinematic RCM test: T0 -> %s; nominal duration %.1f s.',
+        config.targetName,
+        duration
+    ))
 end
 
 function sysCall_actuation()
@@ -344,7 +390,12 @@ function sysCall_actuation()
         attemptsUsed = attempt
         nextTime = math.min(duration, elapsed + advance)
 
-        local targetPose = Trajectory.poseAt(nextTime, duration)
+        local targetPose = Trajectory.poseAt(
+            nextTime,
+            duration,
+            startPosition,
+            goalPosition
+        )
         sim.setObjectPose(target, targetPose, anatomy)
 
         -- Repartir de la configuration du robot, toujours inchangee,
@@ -444,10 +495,17 @@ function sysCall_actuation()
             1000*smallestClearance
         ))
 
-        local goal = sim.getObject('/Anatomy_V0/target_T1')
+        local finalPosition = sim.getObjectPosition(tip, anatomy)
+        local finalError = norm({
+            finalPosition[1] - goalPosition[1],
+            finalPosition[2] - goalPosition[2],
+            finalPosition[3] - goalPosition[3]
+        })
+
         message(string.format(
-            'Ecart final pointe-T1 : %.4f mm',
-            1000*norm(sim.getObjectPosition(tip, goal))
+            'Final tip-to-%s error: %.4f mm',
+            config.targetName,
+            1000*finalError
         ))
         runStatus = 'completed'
         runReason = 'Target reached; sampled checks passed'
