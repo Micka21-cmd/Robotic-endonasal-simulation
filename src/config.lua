@@ -4,7 +4,7 @@
 local Config = {}
 
 function Config.create(projectRoot)
-    local targetName = 'T1'
+    local targetName = 'T2'
 
     assert(
         targetName == 'T1' or targetName == 'T2',
@@ -20,7 +20,7 @@ function Config.create(projectRoot)
 
         runLabel = 'V0_B_' .. targetName,
         method = 'prescribed_motion_ik',
-        runNote = 'Verification of centralized target selection',
+        runNote = 'T0 to T2 verification with modular tracking code',
 
         duration = 16,
 
