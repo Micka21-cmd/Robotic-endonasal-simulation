@@ -22,11 +22,10 @@ local Trajectory = dofile(projectRoot .. '/src/trajectory.lua')
 local Validation = dofile(projectRoot .. '/src/validation.lua')
 local validator
 
-local exportDir = config.exportDir
-local runLabel = config.runLabel
+local Export = dofile(projectRoot .. '/src/export.lua')
+local recorder
 
 
-local dataRows = {}
 local replayTime = 0
 local runStatus = 'incomplete'
 local runReason = 'Stopped before completion, or script error'
@@ -44,10 +43,6 @@ local maxTipError = config.maxTipError
 local minClearance = config.minClearance
 local maxJointStep = config.maxJointStep
 
-local worstRcm = 0
-local worstTip = 0
-local smallestClearance = math.huge
-local checks = 0
 
 local goal
 local startPosition
@@ -127,186 +122,43 @@ local function recordAcceptedState(attempts)
     local q = robotModel:readConfiguration()
     local p = sim.getObjectPosition(tip, anatomy)
     local pd = sim.getObjectPosition(target, anatomy)
+
     local rcm, tipError, clearance, _, collision = measureState()
 
-    assert(clearance ~= nil, 'Distance indisponible pour export')
-
-    local row = {
-        #dataRows,             -- indice : 0 pour le depart
-        replayTime,            -- temps cumule des pas de relecture
-        elapsed,               -- progression sur la loi nominale
-        elapsed / duration,    -- tau
-        attempts
-    }
-
-    for i = 1, 6 do
-        row[#row + 1] = q[i]
-    end
-    for i = 1, 3 do
-        row[#row + 1] = p[i]
-    end
-    for i = 1, 3 do
-        row[#row + 1] = pd[i]
-    end
-
-    row[#row + 1] = rcm
-    row[#row + 1] = tipError
-    row[#row + 1] = clearance
-    row[#row + 1] = collision and 1 or 0
-
-    dataRows[#dataRows + 1] = row
-
-    -- Update statistics only after recording an accepted state.
-    checks = checks + 1
-    worstRcm = math.max(worstRcm, rcm)
-    worstTip = math.max(worstTip, tipError)
-    smallestClearance = math.min(smallestClearance, clearance)
+    recorder:record({
+        replayTime = replayTime,
+        progressTime = elapsed,
+        ikAttempts = attempts,
+        configuration = q,
+        tipPosition = p,
+        targetPosition = pd,
+        rcmError = rcm,
+        tipError = tipError,
+        clearance = clearance,
+        collision = collision
+    })
 end
 
-local function csvCell(value)
-    if type(value) == 'number' then
-        -- Point decimal, precision suffisante pour les petites erreurs.
-        return (string.format('%.15g', value):gsub(',', '.'))
-    end
-
-    local text = tostring(value)
-    return '"' .. text:gsub('"', '""') .. '"'
-end
-
-local function writeCsv(path, header, rows)
-    local file, err = io.open(path, 'w')
-    if not file then
-        error('Ouverture impossible : ' .. path .. ' : ' .. tostring(err))
-    end
-
-    local ok, writeError = pcall(function()
-        local function writeRow(row)
-            local cells = {}
-            for i, value in ipairs(row) do
-                cells[i] = csvCell(value)
-            end
-            assert(file:write(table.concat(cells, ',') .. '\n'))
-        end
-
-        writeRow(header)
-        for _, row in ipairs(rows) do
-            writeRow(row)
-        end
-    end)
-
-    local closed, closeError = file:close()
-    if not ok then error(writeError) end
-    if not closed then error(closeError) end
-end
-
-local function fileExists(path)
-    local file = io.open(path, 'r')
-    if file then
-        file:close()
-        return true
-    end
-    return false
-end
 
 local function exportRun()
-    local runDir, runId = RunDirectory.create(
-        exportDir,
-        runLabel,
-        runStartedAt or os.time()
-    )
+    assert(recorder ~= nil, 'Export recorder was not initialized')
 
-    local stem = runDir .. '/' .. runLabel
-
-    local header = {
-        'sample', 'replay_time_s', 'progress_time_s', 'tau',
-        'ik_attempts',
-        'q1_rad', 'q2_rad', 'q3_rad',
-        'q4_rad', 'q5_rad', 'q6_rad',
-        'tip_x_m', 'tip_y_m', 'tip_z_m',
-        'target_x_m', 'target_y_m', 'target_z_m',
-        'rcm_error_m', 'tip_error_m', 'clearance_m',
-        'robot_wall_collision'
-    }
-
-    writeCsv(stem .. '_states.csv', header, dataRows)
-
-    local summary = {
-        {'run_label', runLabel},
-        {'status', runStatus},
-        {'reason', runReason},
-        {'accepted_samples', #dataRows},
-        {'nominal_duration_s', duration},
-        {'replay_time_s', replayTime},
-        {'progress_time_s', elapsed},
-        {'max_rcm_error_allowed_m', maxRcmError},
-        {'max_tip_error_allowed_m', maxTipError},
-        {'min_clearance_allowed_m', minClearance},
-        {'max_joint_step_rad', maxJointStep},
-        {'position_frame', 'Anatomy_V0'},
-        {'dynamics_enabled_during_tracking', 0},
-        {'run_id', runId},
-        {'started_at_local', os.date(
-            '%Y-%m-%dT%H:%M:%S', runStartedAt or os.time()
-        )},
-        {'method', config.method},
-        {'run_note', config.runNote},
-        {'ik_damping', config.ikDamping},
-        {'ik_max_iterations', config.ikMaxIterations},
-        {'ik_position_tolerance_m', config.ikPositionTolerance},
-        {'ik_orientation_tolerance_rad', config.ikOrientationTolerance},
-        {'max_ik_attempts', config.maxIkAttempts},
-    }
-    summary[#summary + 1] = {'target_name', config.targetName}
-    summary[#summary + 1] = {'target_path', config.targetPath}
-
-    if startPosition and goalPosition then
-        local axes = {'x', 'y', 'z'}
-
-        for i = 1, 3 do
-            summary[#summary + 1] = {
-                'start_' .. axes[i] .. '_m',
-                startPosition[i]
-            }
-
-            summary[#summary + 1] = {
-                'goal_' .. axes[i] .. '_m',
-                goalPosition[i]
-            }
-        end
-    end
-
-    -- Ne pas publier de faux extrema si aucun etat n'a ete accepte.
-    if #dataRows > 0 then
-        summary[#summary + 1] = {'max_rcm_error_m', worstRcm}
-        summary[#summary + 1] = {'max_tip_error_m', worstTip}
-        summary[#summary + 1] = {
-            'min_clearance_m', smallestClearance
-        }
-    end
-
-    if initialAnatomyPose then
-        local names = {'x_m', 'y_m', 'z_m', 'qx', 'qy', 'qz', 'qw'}
-        for i = 1, 7 do
-            summary[#summary + 1] = {
-                'anatomy_world_' .. names[i],
-                initialAnatomyPose[i]
-            }
-        end
-    end
-
-    writeCsv(stem .. '_summary.csv', {'parameter', 'value'}, summary)
-
-    message('Export etats : ' .. stem .. '_states.csv')
-    message('Export bilan : ' .. stem .. '_summary.csv')
-    message(string.format(
-        'Export termine : %d configurations ; statut=%s',
-        #dataRows, runStatus
-    ))
+    recorder:write({
+        startedAt = runStartedAt,
+        status = runStatus,
+        reason = runReason,
+        replayTime = replayTime,
+        progressTime = elapsed,
+        initialAnatomyPose = initialAnatomyPose,
+        startPosition = startPosition,
+        goalPosition = goalPosition
+    })
 end
 
 function sysCall_init()
     local robot = sim.getObject('..')
     runStartedAt = os.time()
+    recorder = Export.new(config, RunDirectory, message)
     anatomy = sim.getObject('/Anatomy_V0')
     shaft = sim.getObject('/UR3/Instrument_shaft')
     tip = sim.getObject('/UR3/tool_tip')
@@ -483,17 +335,23 @@ function sysCall_actuation()
     if elapsed >= duration then
         running = false
         message(string.format(
-            'TEST TERMINE : %d configurations controlees.', checks
+            'TEST COMPLETED: %d accepted configurations recorded.',
+            recorder.count
         ))
+
         message(string.format(
-            'Erreur RCM maximale : %.4f mm', 1000*worstRcm
+            'Maximum RCM error: %.4f mm',
+            1000*recorder.maxRcmError
         ))
+
         message(string.format(
-            'Erreur de suivi maximale : %.4f mm', 1000*worstTip
+            'Maximum tip tracking error: %.4f mm',
+            1000*recorder.maxTipError
         ))
+
         message(string.format(
-            'Distance minimale tige-parois : %.4f mm',
-            1000*smallestClearance
+            'Minimum shaft-wall clearance: %.4f mm',
+            1000*recorder.minClearance
         ))
 
         local finalPosition = sim.getObjectPosition(tip, anatomy)
