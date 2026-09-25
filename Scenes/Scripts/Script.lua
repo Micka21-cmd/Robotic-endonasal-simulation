@@ -17,6 +17,8 @@ local ikSolver
 local RunDirectory = dofile(projectRoot .. '/src/run_directory.lua')
 local runStartedAt
 
+local Trajectory = dofile(projectRoot .. '/src/trajectory.lua')
+
 local exportDir = config.exportDir
 local runLabel = config.runLabel
 
@@ -342,17 +344,8 @@ function sysCall_actuation()
         attemptsUsed = attempt
         nextTime = math.min(duration, elapsed + advance)
 
-        local u = nextTime / duration
-        local s = 3*u*u - 2*u*u*u
-        local x, z = 0.003*s, 0.075
-
-        -- Rotation autour de Y : l'axe Z pointe vers (x, 0, z).
-        local angle = math.atan(x / z)
-
-        sim.setObjectPose(target, {
-            x, 0, z,
-            0, math.sin(angle/2), 0, math.cos(angle/2)
-        }, anatomy)
+        local targetPose = Trajectory.poseAt(nextTime, duration)
+        sim.setObjectPose(target, targetPose, anatomy)
 
         -- Repartir de la configuration du robot, toujours inchangee,
         -- y compris apres un essai IK rejete.
