@@ -20,7 +20,7 @@ function Config.create(projectRoot)
 
         runLabel = 'V0_B_' .. targetName,
         method = 'prescribed_motion_ik',
-        runNote = 'T0 to T1 verification after experiment module extraction',
+        runNote = 'Prescribed-motion test with sampled joint-segment checks',
 
         duration = 16,
 
@@ -28,6 +28,8 @@ function Config.create(projectRoot)
         maxTipError = 0.0005,
         minClearance = 0.001,
         maxJointStep = math.rad(0.5),
+
+        segmentResolutionRad = math.rad(0.1),
 
         maxIkAttempts = 8,
 

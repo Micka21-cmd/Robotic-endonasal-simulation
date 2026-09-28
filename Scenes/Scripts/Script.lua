@@ -18,7 +18,8 @@ local modules = {
     Trajectory = loadModule('trajectory'),
     Validation = loadModule('validation'),
     RunDirectory = loadModule('run_directory'),
-    Export = loadModule('export')
+    Export = loadModule('export'),
+    SegmentValidation = loadModule('segment_validation')
 }
 
 local experiment

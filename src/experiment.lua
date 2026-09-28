@@ -269,11 +269,36 @@ function Experiment:step()
 
     self.slowdownReported = attemptsUsed > 1
 
+        local segmentValid, segmentReason =
+            self.modules.SegmentValidation.check(
+                self.robot,
+                self.validator,
+                previousQ,
+                candidate,
+                config.segmentResolutionRad
+            )
+
+        if not segmentValid then
+            -- The segment checker has already restored the robot.
+            sim.setObjectPose(
+                self.target,
+                previousTarget,
+                sim.handle_world
+            )
+
+            self.ikSolver:syncFromScene()
+
+            self:abort(
+                'Joint segment rejected: ' .. segmentReason
+            )
+            return
+        end
+
     -- Apply temporarily, then check the resulting scene geometry.
     self.robot:setConfiguration(candidate)
 
     local valid, reason = self.validator:checkState()
-    if not valid then
+        if not valid then
         self.robot:setConfiguration(previousQ)
 
         sim.setObjectPose(
@@ -281,6 +306,34 @@ function Experiment:step()
             previousTarget,
             sim.handle_world
         )
+
+        -- Diagnostic: read back the scene joints after restoration.
+        local restoredQ = self.robot:readConfiguration()
+        local maxRestoreError = 0
+
+        for i = 1, #previousQ do
+            local difference = math.abs(restoredQ[i] - previousQ[i])
+            maxRestoreError = math.max(maxRestoreError, difference)
+        end
+
+        local restoreTolerance = 1e-9 -- rad; diagnostic tolerance
+        local restorationPassed = maxRestoreError <= restoreTolerance
+
+        self:message(string.format(
+            'Joint rollback check: %s; max error=%.3e rad; '
+                .. 'tolerance=%.1e rad; accepted progress=%.6f s',
+            restorationPassed and 'PASS' or 'FAIL',
+            maxRestoreError,
+            restoreTolerance,
+            self.elapsed
+        ))
+
+        if not restorationPassed then
+            reason = reason .. string.format(
+                ' Joint rollback failed: max error=%.3e rad.',
+                maxRestoreError
+            )
+        end
 
         self:abort(reason)
         return

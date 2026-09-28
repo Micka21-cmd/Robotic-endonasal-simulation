@@ -91,7 +91,7 @@ function Validation:measureState()
     return rcmError, tipError, clearance, entryOnShaft, collision
 end
 
-function Validation:checkState()
+function Validation:checkState(checkTracking)
     local rcm, tipError, clearance, onShaft, collision =
         self:measureState()
 
@@ -113,7 +113,8 @@ function Validation:checkState()
         )
     end
 
-    if tipError > self.config.maxTipError then
+    if checkTracking ~= false
+        and tipError > self.config.maxTipError then
         return false, string.format(
             'Tip tracking error = %.4f mm.', 1000*tipError
         )
