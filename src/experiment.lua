@@ -279,6 +279,33 @@ function Experiment:step()
             )
 
         if not segmentValid then
+            -- Read back the configuration restored by the segment checker.
+            local restoredQ = self.robot:readConfiguration()
+            local maxRestoreError = 0
+
+            for i = 1, #previousQ do
+                maxRestoreError = math.max(
+                    maxRestoreError,
+                    math.abs(restoredQ[i] - previousQ[i])
+                )
+            end
+
+            local restorationPassed = maxRestoreError <= 1e-9
+
+            self:message(string.format(
+                'Segment rollback check: %s; max error=%.3e rad; '
+                    .. 'accepted progress=%.6f s',
+                restorationPassed and 'PASS' or 'FAIL',
+                maxRestoreError,
+                self.elapsed
+            ))
+
+            if not restorationPassed then
+                segmentReason = segmentReason .. string.format(
+                    ' Segment rollback failed: max error=%.3e rad.',
+                    maxRestoreError
+                )
+            end
             -- The segment checker has already restored the robot.
             sim.setObjectPose(
                 self.target,
