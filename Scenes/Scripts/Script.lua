@@ -19,7 +19,8 @@ local modules = {
     Validation = loadModule('validation'),
     RunDirectory = loadModule('run_directory'),
     Export = loadModule('export'),
-    SegmentValidation = loadModule('segment_validation')
+    SegmentValidation = loadModule('segment_validation'),
+    LocalConnector = loadModule('local_connector')
 }
 
 

@@ -33,6 +33,9 @@ function Config.create(projectRoot)
 
         maxIkAttempts = 8,
 
+        localConnectorStepM = 0.0001, -- 0.1 mm between tip commands
+        localConnectorMaxSteps = 1000,
+
         ikDamping = 0.01,
         ikMaxIterations = 100,
         ikPositionTolerance = 0.00001,

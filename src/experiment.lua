@@ -154,6 +154,98 @@ function Experiment:initialize()
         return
     end
 
+        self.localConnector = self.modules.LocalConnector.new(
+        sim,
+        self.robot,
+        self.ikSolver,
+        self.validator,
+        self.modules,
+        {
+            anatomy = self.anatomy,
+            tip = self.tip,
+            target = self.target,
+        },
+        config
+    )
+
+    -- Temporary diagnostic: compute a connection without replaying it.
+    local beforeQ = self.robot:readConfiguration()
+    local beforeTarget = sim.getObjectPose(
+        self.target, sim.handle_world
+    )
+
+    local connection = self.localConnector:connect(
+        beforeQ,
+        self.goalPosition
+    )
+
+    -- Measure restoration before any further scene changes.
+    local afterQ = self.robot:readConfiguration()
+    local afterTarget = sim.getObjectPose(
+        self.target, sim.handle_world
+    )
+
+    local jointError = 0
+    for i = 1, #beforeQ do
+        jointError = math.max(
+            jointError,
+            math.abs(afterQ[i] - beforeQ[i])
+        )
+    end
+
+    local targetPositionError = norm({
+        afterTarget[1] - beforeTarget[1],
+        afterTarget[2] - beforeTarget[2],
+        afterTarget[3] - beforeTarget[3],
+    })
+
+    -- Quaternions q and -q represent the same orientation.
+    local quaternionDifference = 0
+    local quaternionSum = 0
+
+    for i = 4, 7 do
+        quaternionDifference = quaternionDifference
+            + (afterTarget[i] - beforeTarget[i])^2
+        quaternionSum = quaternionSum
+            + (afterTarget[i] + beforeTarget[i])^2
+    end
+
+    local targetQuaternionError = math.sqrt(
+        math.min(quaternionDifference, quaternionSum)
+    )
+
+    local restored = jointError <= 1e-9
+        and targetPositionError <= 1e-9
+        and targetQuaternionError <= 1e-9
+
+    self:message(string.format(
+        'Connector restoration: %s; joint=%.3e rad; '
+            .. 'target position=%.3e m; quaternion difference=%.3e',
+        restored and 'PASS' or 'FAIL',
+        jointError,
+        targetPositionError,
+        targetQuaternionError
+    ))
+
+    if not restored then
+        self:abort('Local connector did not restore the scene.')
+        return
+    end
+
+    if not connection.success then
+        self:abort(
+            'Local connector diagnostic failed: '
+                .. tostring(connection.reason)
+        )
+        return
+    end
+
+    self:message(string.format(
+        'Local connector T0 -> %s: PASS; %d configurations returned.',
+        config.targetName,
+        #connection.path
+    ))
+
     self:recordAcceptedState(0)
     self.running = true
 
