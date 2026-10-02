@@ -1,0 +1,10 @@
+[sandboxScript:info] Simulation started.
+[/UR3/Script:info] Connector restoration: PASS; joint=0.000e+00 rad; target position=0.000e+00 m; quaternion difference=0.000e+00
+[/UR3/Script:error] TEST INTERRUPTED: Local connector diagnostic failed: Connector sample 22/31: Segment sample 1/3: Shaft-wall clearance = 6.9983 mm.
+[sandboxScript:info] Simulation suspended.
+[sandboxScript:info] Simulation resumed.
+[sandboxScript:info] Simulation stopping...
+[/UR3/Script:info] State export: C:/Users/Micka/Documents/GitHub/Robotic-endonasal-simulation/Results/20261002_101921_V0_B_T2/V0_B_T2_states.csv
+[/UR3/Script:info] Summary export: C:/Users/Micka/Documents/GitHub/Robotic-endonasal-simulation/Results/20261002_101921_V0_B_T2/V0_B_T2_summary.csv
+[/UR3/Script:info] Export completed: 0 configurations; status=failed
+[sandboxScript:info] Simulation stopped.

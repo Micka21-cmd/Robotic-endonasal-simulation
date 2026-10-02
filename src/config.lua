@@ -20,7 +20,7 @@ function Config.create(projectRoot)
 
         runLabel = 'V0_B_' .. targetName,
         method = 'prescribed_motion_ik',
-        runNote = 'T2 prescribed-motion test with sampled joint-segment checks',
+        runNote = 'T2 prescribed-motion test with local connector diagnostic',
 
         duration = 16,
 
