@@ -218,6 +218,14 @@ function Experiment:initialize()
         and targetPositionError <= 1e-9
         and targetQuaternionError <= 1e-9
 
+
+    self.recorder:recordConnector(connection, {
+        passed = restored,
+        jointError = jointError,
+        targetPositionError = targetPositionError,
+        targetQuaternionError = targetQuaternionError,
+    })
+    
     self:message(string.format(
         'Connector restoration: %s; joint=%.3e rad; '
             .. 'target position=%.3e m; quaternion difference=%.3e',

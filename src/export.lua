@@ -101,6 +101,122 @@ function Export:record(state)
     self.minClearance = math.min(self.minClearance, state.clearance)
 end
 
+function Export:recordConnector(connection, restoration)
+    assert(
+        type(connection.success) == 'boolean',
+        'Connector result must contain a success flag'
+    )
+
+    local rows = {}
+
+    if connection.success then
+        assert(
+            type(connection.path) == 'table'
+                and #connection.path > 0,
+            'Successful connector result must contain a path'
+        )
+
+        for index, configuration in ipairs(connection.path) do
+            assert(#configuration == 6,
+                'Connector configuration must contain six joints')
+
+            local row = {index - 1}
+
+            for joint = 1, 6 do
+                local value = configuration[joint]
+
+                assert(
+                    type(value) == 'number'
+                        and value == value
+                        and math.abs(value) < math.huge,
+                    'Connector joint values must be finite'
+                )
+
+                row[#row + 1] = value
+            end
+
+            rows[#rows + 1] = row
+        end
+    end
+
+    -- Copy data so later changes cannot alter the recorded result.
+    self.connector = {
+        success = connection.success,
+        reason = connection.reason or '',
+        rows = rows,
+        restorationPassed = restoration.passed,
+        jointError = restoration.jointError,
+        targetPositionError = restoration.targetPositionError,
+        targetQuaternionError = restoration.targetQuaternionError,
+    }
+end
+
+function Export:writeConnector(stem, runId)
+    local connector = self.connector
+
+    -- No connector result was recorded, e.g. invalid initial state.
+    if connector == nil then
+        return
+    end
+
+    local config = self.config
+
+    local pathHeader = {
+        'sample',
+        'q1_rad', 'q2_rad', 'q3_rad',
+        'q4_rad', 'q5_rad', 'q6_rad',
+    }
+
+    local summary = {
+        {'run_id', runId},
+        {'run_label', config.runLabel},
+        {'target_name', config.targetName},
+        {'method', 'local_cartesian_connection_ik'},
+        {'status', connector.success and 'success' or 'failed'},
+        {'reason', connector.reason},
+        {'returned_configurations', #connector.rows},
+        {'path_replayed', 0},
+        {'position_frame', 'Anatomy_V0'},
+        {'local_connector_step_m', config.localConnectorStepM},
+        {'local_connector_max_steps', config.localConnectorMaxSteps},
+        {'segment_resolution_rad', config.segmentResolutionRad},
+        {'segment_min_intervals', 2},
+        {'max_joint_step_rad', config.maxJointStep},
+        {'max_rcm_error_allowed_m', config.maxRcmError},
+        {'max_tip_error_allowed_m', config.maxTipError},
+        {'min_clearance_allowed_m', config.minClearance},
+        {'ik_damping', config.ikDamping},
+        {'ik_max_iterations', config.ikMaxIterations},
+        {'ik_position_tolerance_m', config.ikPositionTolerance},
+        {'ik_orientation_tolerance_rad', config.ikOrientationTolerance},
+        {'restoration_passed', connector.restorationPassed and 1 or 0},
+        {'restoration_joint_error_rad', connector.jointError},
+        {'restoration_target_position_error_m',
+            connector.targetPositionError},
+        {'restoration_target_quaternion_difference',
+            connector.targetQuaternionError},
+    }
+
+    writeCsv(
+        stem .. '_connector_path.csv',
+        pathHeader,
+        connector.rows
+    )
+
+    writeCsv(
+        stem .. '_connector_summary.csv',
+        {'parameter', 'value'},
+        summary
+    )
+
+    self.logger(
+        'Connector path export: ' .. stem .. '_connector_path.csv'
+    )
+    self.logger(
+        'Connector summary export: ' .. stem .. '_connector_summary.csv'
+    )
+end
+
 function Export:write(context)
     local config = self.config
     local startedAt = context.startedAt or os.time()
@@ -194,6 +310,7 @@ function Export:write(context)
     end
 
     writeCsv(stem .. '_summary.csv', {'parameter', 'value'}, summary)
+    self:writeConnector(stem, runId)
 
     self.logger('State export: ' .. stem .. '_states.csv')
     self.logger('Summary export: ' .. stem .. '_summary.csv')
