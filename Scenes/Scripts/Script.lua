@@ -20,6 +20,7 @@ local modules = {
     RunDirectory = loadModule('run_directory'),
     Export = loadModule('export'),
     SegmentValidation = loadModule('segment_validation'),
+    RRT = loadModule('rrt'),
     LocalConnector = loadModule('local_connector')
 }
 

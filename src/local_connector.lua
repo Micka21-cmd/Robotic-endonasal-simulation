@@ -187,6 +187,9 @@ function LocalConnector:connect(startQ, goalPosition)
             success = true,
             path = path,
             targetPoses = targetPoses,
+            reachedPosition = copy(sim.getObjectPosition(
+                objects.tip, objects.anatomy
+            )),
             reason = 'Local connection passed sampled checks.',
         }
     end)

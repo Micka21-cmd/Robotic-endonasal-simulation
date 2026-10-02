@@ -51,7 +51,8 @@ function Experiment:initialize()
 
     assert(
         config.executionMode == 'prescribed_motion'
-            or config.executionMode == 'connector_replay',
+            or config.executionMode == 'connector_replay'
+            or config.executionMode == 'rrt_replay',
         'Unsupported execution mode'
     )
 
@@ -180,10 +181,42 @@ function Experiment:initialize()
         self.target, sim.handle_world
     )
 
-    local connection = self.localConnector:connect(
-        beforeQ,
-        self.goalPosition
-    )
+    local connection
+
+    if config.executionMode == 'rrt_replay' then
+        self:message(string.format(
+            'RRT planning: seed=%d; iteration budget=%d.',
+            config.rrtSeed,
+            config.rrtMaxIterations
+        ))
+
+        local startPose = sim.getObjectPose(self.tip, self.anatomy)
+
+        connection = self.modules.RRT.plan(
+            beforeQ,
+            startPose,
+            self.goalPosition,
+            self.localConnector,
+            config
+        )
+
+        self.plannerStats = connection.stats
+
+        self:message(string.format(
+            'RRT result: %s; iterations=%d; nodes=%d; '
+                .. 'connector calls=%d; rejected connections=%d.',
+            connection.success and 'SUCCESS' or 'FAILED',
+            connection.stats.iterations,
+            connection.stats.nodes,
+            connection.stats.connector_calls,
+            connection.stats.rejected_connections
+        ))
+    else
+        connection = self.localConnector:connect(
+            beforeQ,
+            self.goalPosition
+        )
+    end
 
     -- Measure restoration before any further scene changes.
     local afterQ = self.robot:readConfiguration()
@@ -248,19 +281,19 @@ function Experiment:initialize()
 
     if not connection.success then
         self:abort(
-            'Local connector diagnostic failed: '
+            'Path calculation failed: '
                 .. tostring(connection.reason)
         )
         return
     end
 
     self:message(string.format(
-        'Local connector T0 -> %s: PASS; %d configurations returned.',
+        'Path calculation T0 -> %s: PASS; %d configurations returned.',
         config.targetName,
         #connection.path
     ))
 
-    if config.executionMode == 'connector_replay' then
+    if config.executionMode ~= 'prescribed_motion' then
         assert(
             connection.targetPoses
                 and #connection.targetPoses == #connection.path,
@@ -288,7 +321,7 @@ function Experiment:initialize()
         self.running = true
 
         self:message(string.format(
-            'Valid start. Connector replay: T0 -> %s; '
+            'Valid start. Stored path replay: T0 -> %s; '
                 .. '%d stored configurations; one waypoint per simulation step.',
             config.targetName,
             #connection.path
@@ -334,7 +367,7 @@ function Experiment:step()
         return
     end
 
-    if self.config.executionMode == 'connector_replay' then
+    if self.config.executionMode ~= 'prescribed_motion' then
         self:stepConnectorReplay()
         return
     end
@@ -686,9 +719,9 @@ function Experiment:exportRun()
         goalPosition = self.goalPosition,
         executionMode = self.config.executionMode,
         replayStarted = self.replayStarted == true,
-        pathReplayed = self.config.executionMode == 'connector_replay'
-            and self.status == 'completed',
-        finalTipError = self.finalTipError
+        pathReplayed = self.config.executionMode ~= 'prescribed_motion' and self.status == 'completed',
+        finalTipError = self.finalTipError,
+        plannerStats = self.plannerStats,
     })
 end
 

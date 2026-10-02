@@ -6,14 +6,16 @@ local Config = {}
 function Config.create(projectRoot)
     local targetName = 'T2'
     local executionMode = 'connector_replay' -- Modes: 'prescribed_motion' or 'connector_replay'
-    
+    local executionMode = 'rrt_replay'
+
     assert(
         targetName == 'T1' or targetName == 'T2',
         'Unsupported target name'
     )
     assert(
         executionMode == 'prescribed_motion'
-        or executionMode == 'connector_replay',
+            or executionMode == 'connector_replay'
+            or executionMode == 'rrt_replay',
         'Unsupported execution mode'
     )
     return {
@@ -26,11 +28,13 @@ function Config.create(projectRoot)
         runLabel = 'V0_B_' .. targetName,
         executionMode = executionMode,
 
-        method = executionMode == 'connector_replay'
-            and 'local_connector_replay'
-            or 'prescribed_motion_ik',
+        method = ({
+            prescribed_motion = 'prescribed_motion_ik',
+            connector_replay = 'local_connector_replay',
+            rrt_replay = 'rrt_task_space_ik',
+        })[executionMode],
 
-        runNote = 'T2 replay of the stored local connector path',
+        runNote = 'First RRT T2 test without added obstacles',
 
         duration = 16,
 
@@ -50,6 +54,15 @@ function Config.create(projectRoot)
         ikMaxIterations = 100,
         ikPositionTolerance = 0.00001,
         ikOrientationTolerance = math.rad(0.01),
+
+        -- RRT sampling bounds in the anatomical frame, metres.
+        rrtBoundsMin = {-0.004, -0.004, 0.073},
+        rrtBoundsMax = { 0.004,  0.004, 0.077},
+
+        rrtExtensionM = 0.001,
+        rrtGoalBias = 0.15,
+        rrtMaxIterations = 500,
+        rrtSeed = 42,
     }
 end
 

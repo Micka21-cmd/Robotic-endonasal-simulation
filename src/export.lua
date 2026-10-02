@@ -148,6 +148,7 @@ function Export:recordConnector(connection, restoration)
         jointError = restoration.jointError,
         targetPositionError = restoration.targetPositionError,
         targetQuaternionError = restoration.targetQuaternionError,
+        method = connection.method or 'local_cartesian_connection_ik',
     }
 end
 
@@ -161,6 +162,12 @@ function Export:writeConnector(stem, runId, context)
 
     local config = self.config
 
+    local prefix = config.executionMode == 'rrt_replay'
+    and '_rrt' or '_connector'
+
+    local pathFile = stem .. prefix .. '_path.csv'
+    local summaryFile = stem .. prefix .. '_summary.csv'
+
     local pathHeader = {
         'sample',
         'q1_rad', 'q2_rad', 'q3_rad',
@@ -171,7 +178,7 @@ function Export:writeConnector(stem, runId, context)
         {'run_id', runId},
         {'run_label', config.runLabel},
         {'target_name', config.targetName},
-        {'method', 'local_cartesian_connection_ik'},
+        {'method', connector.method},
         {'status', connector.success and 'success' or 'failed'},
         {'reason', connector.reason},
         {'returned_configurations', #connector.rows},
@@ -200,24 +207,16 @@ function Export:writeConnector(stem, runId, context)
             connector.targetQuaternionError},
     }
 
-    writeCsv(
-        stem .. '_connector_path.csv',
-        pathHeader,
-        connector.rows
-    )
+    writeCsv(pathFile, pathHeader, connector.rows)
 
     writeCsv(
-        stem .. '_connector_summary.csv',
+        summaryFile,
         {'parameter', 'value'},
         summary
     )
 
-    self.logger(
-        'Connector path export: ' .. stem .. '_connector_path.csv'
-    )
-    self.logger(
-        'Connector summary export: ' .. stem .. '_connector_summary.csv'
-    )
+    self.logger('Calculated path export: ' .. pathFile)
+    self.logger('Path summary export: ' .. summaryFile)
 end
 
 function Export:write(context)
@@ -251,15 +250,17 @@ function Export:write(context)
         {'reason', context.reason},
         {'accepted_samples', self.count},
         {'execution_mode', context.executionMode},
-        {'nominal_duration_s',
-            context.executionMode == 'connector_replay'
+         {'nominal_duration_s',
+            context.executionMode ~= 'prescribed_motion'
                 and 'not_applicable' or config.duration},
+
         {'replay_policy',
-            context.executionMode == 'connector_replay'
+            context.executionMode ~= 'prescribed_motion'
                 and 'one_waypoint_per_simulation_step'
                 or 'prescribed_cartesian_motion'},
+
         {'tau_definition',
-            context.executionMode == 'connector_replay'
+            context.executionMode ~= 'prescribed_motion'
                 and 'accepted_path_index_fraction'
                 or 'progress_time_over_nominal_duration'},
         {'segment_resolution_rad', config.segmentResolutionRad},
@@ -330,6 +331,53 @@ function Export:write(context)
             'final_tip_to_goal_error_m', context.finalTipError
         }
     end
+
+    if context.plannerStats then
+        local stats = context.plannerStats
+
+        for _, name in ipairs({
+            'seed',
+            'iterations',
+            'nodes',
+            'connector_calls',
+            'rejected_connections',
+        }) do
+            summary[#summary + 1] = {
+                'rrt_' .. name, stats[name]
+            }
+        end
+
+        summary[#summary + 1] = {
+            'rrt_max_iterations', config.rrtMaxIterations
+        }
+        summary[#summary + 1] = {
+            'rrt_extension_m', config.rrtExtensionM
+        }
+        summary[#summary + 1] = {
+            'rrt_goal_bias', config.rrtGoalBias
+        }
+        summary[#summary + 1] = {
+            'rrt_sampling_frame', 'Anatomy_V0'
+        }
+        summary[#summary + 1] = {
+            'rrt_nearest_metric', 'euclidean_tip_position'
+        }
+        summary[#summary + 1] = {
+            'rrt_random_generator', 'park_miller_16807'
+        }
+
+        for i, axis in ipairs({'x', 'y', 'z'}) do
+            summary[#summary + 1] = {
+                'rrt_bounds_min_' .. axis .. '_m',
+                config.rrtBoundsMin[i]
+            }
+            summary[#summary + 1] = {
+                'rrt_bounds_max_' .. axis .. '_m',
+                config.rrtBoundsMax[i]
+            }
+        end
+    end
+
     writeCsv(stem .. '_summary.csv', {'parameter', 'value'}, summary)
     self:writeConnector(stem, runId, context)
 
