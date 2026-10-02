@@ -71,7 +71,7 @@ function Export:record(state)
         self.count,
         state.replayTime,
         state.progressTime,
-        state.progressTime / self.config.duration,
+        state.pathFraction or (state.progressTime / self.config.duration),
         state.ikAttempts
     }
 
@@ -151,7 +151,7 @@ function Export:recordConnector(connection, restoration)
     }
 end
 
-function Export:writeConnector(stem, runId)
+function Export:writeConnector(stem, runId, context)
     local connector = self.connector
 
     -- No connector result was recorded, e.g. invalid initial state.
@@ -175,7 +175,10 @@ function Export:writeConnector(stem, runId)
         {'status', connector.success and 'success' or 'failed'},
         {'reason', connector.reason},
         {'returned_configurations', #connector.rows},
-        {'path_replayed', 0},
+        {'replay_started', context.replayStarted and 1 or 0},
+        {'path_replayed', context.pathReplayed and 1 or 0},
+        {'replay_status', context.replayStarted and context.status or 'not_started'},
+        {'replay_accepted_samples', context.replayStarted and self.count or 0},
         {'position_frame', 'Anatomy_V0'},
         {'local_connector_step_m', config.localConnectorStepM},
         {'local_connector_max_steps', config.localConnectorMaxSteps},
@@ -247,7 +250,20 @@ function Export:write(context)
         {'status', context.status},
         {'reason', context.reason},
         {'accepted_samples', self.count},
-        {'nominal_duration_s', config.duration},
+        {'execution_mode', context.executionMode},
+        {'nominal_duration_s',
+            context.executionMode == 'connector_replay'
+                and 'not_applicable' or config.duration},
+        {'replay_policy',
+            context.executionMode == 'connector_replay'
+                and 'one_waypoint_per_simulation_step'
+                or 'prescribed_cartesian_motion'},
+        {'tau_definition',
+            context.executionMode == 'connector_replay'
+                and 'accepted_path_index_fraction'
+                or 'progress_time_over_nominal_duration'},
+        {'segment_resolution_rad', config.segmentResolutionRad},
+        {'segment_min_intervals', 2},
         {'replay_time_s', context.replayTime},
         {'progress_time_s', context.progressTime},
         {'max_rcm_error_allowed_m', config.maxRcmError},
@@ -309,8 +325,13 @@ function Export:write(context)
         end
     end
 
+    if context.finalTipError ~= nil then
+        summary[#summary + 1] = {
+            'final_tip_to_goal_error_m', context.finalTipError
+        }
+    end
     writeCsv(stem .. '_summary.csv', {'parameter', 'value'}, summary)
-    self:writeConnector(stem, runId)
+    self:writeConnector(stem, runId, context)
 
     self.logger('State export: ' .. stem .. '_states.csv')
     self.logger('Summary export: ' .. stem .. '_summary.csv')

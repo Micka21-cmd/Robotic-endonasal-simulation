@@ -49,6 +49,12 @@ function Experiment:initialize()
     local sim = self.sim
     local config = self.config
 
+    assert(
+        config.executionMode == 'prescribed_motion'
+            or config.executionMode == 'connector_replay',
+        'Unsupported execution mode'
+    )
+
     self.startedAt = os.time()
 
     self.recorder = self.modules.Export.new(
@@ -225,7 +231,7 @@ function Experiment:initialize()
         targetPositionError = targetPositionError,
         targetQuaternionError = targetQuaternionError,
     })
-    
+
     self:message(string.format(
         'Connector restoration: %s; joint=%.3e rad; '
             .. 'target position=%.3e m; quaternion difference=%.3e',
@@ -254,14 +260,50 @@ function Experiment:initialize()
         #connection.path
     ))
 
-    self:recordAcceptedState(0)
-    self.running = true
+    if config.executionMode == 'connector_replay' then
+        assert(
+            connection.targetPoses
+                and #connection.targetPoses == #connection.path,
+            'Connector references do not match the path'
+        )
 
-    self:message(string.format(
-        'Valid start. Kinematic RCM test: T0 -> %s; nominal duration %.1f s.',
-        config.targetName,
-        config.duration
-    ))
+        self.connection = connection
+        self.pathIndex = 1
+        self.pathFraction = 0
+
+        sim.setObjectPose(
+            self.target,
+            connection.targetPoses[1],
+            self.anatomy
+        )
+
+        local startValid, startReason = self.validator:checkState()
+        if not startValid then
+            self:abort('Replay start rejected: ' .. tostring(startReason))
+            return
+        end
+
+        self:recordAcceptedState(0)
+        self.replayStarted = true
+        self.running = true
+
+        self:message(string.format(
+            'Valid start. Connector replay: T0 -> %s; '
+                .. '%d stored configurations; one waypoint per simulation step.',
+            config.targetName,
+            #connection.path
+        ))
+    else
+        self:recordAcceptedState(0)
+        self.running = true
+
+        self:message(string.format(
+            'Valid start. Kinematic RCM test: T0 -> %s; '
+                .. 'nominal duration %.1f s.',
+            config.targetName,
+            config.duration
+        ))
+    end
 end
 
 function Experiment:recordAcceptedState(attempts)
@@ -282,12 +324,18 @@ function Experiment:recordAcceptedState(attempts)
         rcmError = rcm,
         tipError = tipError,
         clearance = clearance,
-        collision = collision
+        collision = collision,
+        pathFraction = self.pathFraction
     })
 end
 
 function Experiment:step()
     if not self.running then
+        return
+    end
+
+    if self.config.executionMode == 'connector_replay' then
+        self:stepConnectorReplay()
         return
     end
 
@@ -475,8 +523,118 @@ function Experiment:step()
     end
 end
 
+function Experiment:stepConnectorReplay()
+    local sim = self.sim
+    local connection = self.connection
+    local nextIndex = self.pathIndex + 1
+
+    if nextIndex > #connection.path then
+        self:complete()
+        return
+    end
+
+    local previousQ = self.robot:readConfiguration()
+    local previousTarget = sim.getObjectPose(
+        self.target, sim.handle_world
+    )
+
+    local candidate = connection.path[nextIndex]
+    local targetPose = connection.targetPoses[nextIndex]
+
+    -- Restore the last accepted scene state on rejection or Lua error.
+    local executed, valid, reason = pcall(function()
+        local jointsValid, jointReason =
+            self.validator:checkJoints(candidate, previousQ)
+
+        if not jointsValid then
+            return false, jointReason
+        end
+
+        local segmentValid, segmentReason =
+            self.modules.SegmentValidation.check(
+                self.robot,
+                self.validator,
+                previousQ,
+                candidate,
+                self.config.segmentResolutionRad
+            )
+
+        if not segmentValid then
+            return false, 'Joint segment rejected: '
+                .. tostring(segmentReason)
+        end
+
+        sim.setObjectPose(self.target, targetPose, self.anatomy)
+        self.robot:setConfiguration(candidate)
+
+        -- Includes tip tracking against the stored reference.
+        return self.validator:checkState()
+    end)
+
+    if not executed or not valid then
+        self.robot:setConfiguration(previousQ)
+        sim.setObjectPose(
+            self.target, previousTarget, sim.handle_world
+        )
+        self.ikSolver:syncFromScene()
+
+        local failureReason
+        if executed then
+            failureReason = tostring(reason)
+        else
+            failureReason = 'Lua error: ' .. tostring(valid)
+        end
+
+        self:abort(string.format(
+            'Connector replay sample %d/%d: %s',
+            nextIndex - 1,
+            #connection.path - 1,
+            failureReason
+        ))
+        return
+    end
+
+    self.pathIndex = nextIndex
+    self.pathFraction =
+        (nextIndex - 1) / (#connection.path - 1)
+
+    self.replayTime =
+        self.replayTime + sim.getSimulationTimeStep()
+
+    -- For discrete replay, progress time is accepted replay time.
+    self.elapsed = self.replayTime
+
+    -- No IK solve takes place during replay.
+    self:recordAcceptedState(0)
+
+    if nextIndex == #connection.path then
+        self:complete()
+    end
+end
+
 function Experiment:complete()
     self.running = false
+    local p = self.sim.getObjectPosition(self.tip, self.anatomy)
+
+    local finalError = norm({
+        p[1] - self.goalPosition[1],
+        p[2] - self.goalPosition[2],
+        p[3] - self.goalPosition[3],
+    })
+
+    self.finalTipError = finalError
+
+    if finalError ~= finalError
+        or finalError == math.huge
+        or finalError > self.config.maxTipError then
+
+        self:abort(string.format(
+            'Final tip-to-%s error rejected: %.6f mm',
+            self.config.targetName,
+            1000 * finalError
+        ))
+        return
+    end
 
     self:message(string.format(
         'TEST COMPLETED: %d accepted configurations recorded.',
@@ -498,7 +656,6 @@ function Experiment:complete()
         1000*self.recorder.minClearance
     ))
 
-    local p = self.sim.getObjectPosition(self.tip, self.anatomy)
     local finalError = norm({
         p[1] - self.goalPosition[1],
         p[2] - self.goalPosition[2],
@@ -526,7 +683,12 @@ function Experiment:exportRun()
         progressTime = self.elapsed,
         initialAnatomyPose = self.initialAnatomyPose,
         startPosition = self.startPosition,
-        goalPosition = self.goalPosition
+        goalPosition = self.goalPosition,
+        executionMode = self.config.executionMode,
+        replayStarted = self.replayStarted == true,
+        pathReplayed = self.config.executionMode == 'connector_replay'
+            and self.status == 'completed',
+        finalTipError = self.finalTipError
     })
 end
 

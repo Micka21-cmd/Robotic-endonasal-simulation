@@ -114,6 +114,11 @@ function LocalConnector:connect(startQ, goalPosition)
         end
 
         local path = {copy(startQ)}
+        -- The initial reference is the actual entry tip pose.
+        -- Subsequent references are the Cartesian commands used by IK.
+        local targetPoses = {
+            copy(sim.getObjectPose(objects.tip, objects.anatomy))
+        }
         local previousQ = copy(startQ)
 
         for sample = 1, intervals do
@@ -174,12 +179,14 @@ function LocalConnector:connect(startQ, goalPosition)
             end
 
             path[#path + 1] = copy(candidate)
+            targetPoses[#targetPoses + 1] = copy(pose)
             previousQ = copy(candidate)
         end
 
         return {
             success = true,
             path = path,
+            targetPoses = targetPoses,
             reason = 'Local connection passed sampled checks.',
         }
     end)

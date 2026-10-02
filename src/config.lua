@@ -5,12 +5,17 @@ local Config = {}
 
 function Config.create(projectRoot)
     local targetName = 'T2'
-
+    local executionMode = 'connector_replay' -- Modes: 'prescribed_motion' or 'connector_replay'
+    
     assert(
         targetName == 'T1' or targetName == 'T2',
         'Unsupported target name'
     )
-
+    assert(
+        executionMode == 'prescribed_motion'
+        or executionMode == 'connector_replay',
+        'Unsupported execution mode'
+    )
     return {
         exportDir = projectRoot .. '/Results',
 
@@ -19,8 +24,13 @@ function Config.create(projectRoot)
         startPosition = {0, 0, 0.075},
 
         runLabel = 'V0_B_' .. targetName,
-        method = 'prescribed_motion_ik',
-        runNote = 'T2 prescribed-motion test with local connector diagnostic',
+        executionMode = executionMode,
+
+        method = executionMode == 'connector_replay'
+            and 'local_connector_replay'
+            or 'prescribed_motion_ik',
+
+        runNote = 'T2 replay of the stored local connector path',
 
         duration = 16,
 
