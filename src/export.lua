@@ -92,6 +92,28 @@ function Export:record(state)
     row[#row + 1] = state.clearance
     row[#row + 1] = state.collision and 1 or 0
 
+    if self.config.obstacleEnabled then
+        local distance = state.obstacleClearance
+
+        assert(
+            type(distance) == 'number'
+                and distance == distance
+                and math.abs(distance) < math.huge,
+            'Obstacle clearance unavailable or invalid for recording'
+        )
+
+        row[#row + 1] = distance
+        row[#row + 1] = state.obstacleCollision and 1 or 0
+
+        self.minObstacleClearance = math.min(
+            self.minObstacleClearance or math.huge,
+            distance
+        )
+    else
+        row[#row + 1] = ''
+        row[#row + 1] = ''
+    end
+
     self.rows[#self.rows + 1] = row
 
     -- Statistics describe the accepted states recorded above.
@@ -239,7 +261,9 @@ function Export:write(context)
         'tip_x_m', 'tip_y_m', 'tip_z_m',
         'target_x_m', 'target_y_m', 'target_z_m',
         'rcm_error_m', 'tip_error_m', 'clearance_m',
-        'robot_wall_collision'
+        'robot_wall_collision',
+        'shaft_obstacle_clearance_m',
+        'robot_obstacle_collision',
     }
 
     writeCsv(stem .. '_states.csv', header, self.rows)
@@ -375,6 +399,50 @@ function Export:write(context)
                 'rrt_bounds_max_' .. axis .. '_m',
                 config.rrtBoundsMax[i]
             }
+        end
+    end
+
+    summary[#summary + 1] = {
+        'obstacle_enabled', config.obstacleEnabled and 1 or 0
+    }
+
+    if config.obstacleEnabled then
+        summary[#summary + 1] = {
+            'obstacle_path', config.obstaclePath
+        }
+
+        summary[#summary + 1] = {
+            'min_obstacle_clearance_allowed_m',
+            config.minObstacleClearance
+        }
+
+        if self.minObstacleClearance ~= nil then
+            summary[#summary + 1] = {
+                'min_shaft_obstacle_clearance_m',
+                self.minObstacleClearance
+            }
+        end
+
+        if context.obstaclePose then
+            local names = {
+                'x_m', 'y_m', 'z_m', 'qx', 'qy', 'qz', 'qw'
+            }
+
+            for i, name in ipairs(names) do
+                summary[#summary + 1] = {
+                    'obstacle_anatomy_' .. name,
+                    context.obstaclePose[i]
+                }
+            end
+        end
+
+        if context.obstacleDimensions then
+            for i, axis in ipairs({'x', 'y', 'z'}) do
+                summary[#summary + 1] = {
+                    'obstacle_size_' .. axis .. '_m',
+                    context.obstacleDimensions[i]
+                }
+            end
         end
     end
 

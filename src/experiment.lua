@@ -74,6 +74,21 @@ function Experiment:initialize()
     self.target = sim.getObject('/tool_target')
     self.wall = sim.getObject('/Anatomy_V0/Corridor_wall')
 
+    if config.obstacleEnabled then
+        self.obstacle = sim.getObject(config.obstaclePath)
+
+        self.initialObstaclePose = sim.getObjectPose(
+            self.obstacle, self.anatomy
+        )
+
+        local _, _, dimensions = sim.getShapeGeomInfo(self.obstacle)
+        self.obstacleDimensions = {
+            dimensions[1],
+            dimensions[2],
+            dimensions[3],
+        }
+    end
+
     local goal = sim.getObject(config.targetPath)
 
     self.startPosition = {
@@ -142,6 +157,7 @@ function Experiment:initialize()
             tip = self.tip,
             target = self.target,
             wall = self.wall,
+            obstacle = self.obstacle,
             robotCollection = self.robotCollection
         },
         config
@@ -161,7 +177,17 @@ function Experiment:initialize()
         return
     end
 
-        self.localConnector = self.modules.LocalConnector.new(
+    if config.obstacleEnabled then
+        local clearance = self.validator:measureObstacle()
+
+        self:message(string.format(
+            'Initial shaft-obstacle clearance: %.4f mm; minimum: %.4f mm.',
+            1000 * clearance,
+            1000 * config.minObstacleClearance
+        ))
+    end
+
+    self.localConnector = self.modules.LocalConnector.new(
         sim,
         self.robot,
         self.ikSolver,
@@ -343,7 +369,8 @@ function Experiment:recordAcceptedState(attempts)
     local q = self.robot:readConfiguration()
     local p = self.sim.getObjectPosition(self.tip, self.anatomy)
     local pd = self.sim.getObjectPosition(self.target, self.anatomy)
-
+    local obstacleClearance, obstacleCollision =
+        self.validator:measureObstacle()
     local rcm, tipError, clearance, _, collision =
         self.validator:measureState()
 
@@ -358,7 +385,9 @@ function Experiment:recordAcceptedState(attempts)
         tipError = tipError,
         clearance = clearance,
         collision = collision,
-        pathFraction = self.pathFraction
+        pathFraction = self.pathFraction,
+        obstacleClearance = obstacleClearance,
+        obstacleCollision = obstacleCollision,
     })
 end
 
@@ -689,6 +718,13 @@ function Experiment:complete()
         1000*self.recorder.minClearance
     ))
 
+    if self.recorder.minObstacleClearance ~= nil then
+        self:message(string.format(
+            'Minimum shaft-obstacle clearance: %.4f mm',
+            1000 * self.recorder.minObstacleClearance
+        ))
+    end
+
     local finalError = norm({
         p[1] - self.goalPosition[1],
         p[2] - self.goalPosition[2],
@@ -722,6 +758,8 @@ function Experiment:exportRun()
         pathReplayed = self.config.executionMode ~= 'prescribed_motion' and self.status == 'completed',
         finalTipError = self.finalTipError,
         plannerStats = self.plannerStats,
+        obstaclePose = self.initialObstaclePose,
+        obstacleDimensions = self.obstacleDimensions,
     })
 end
 

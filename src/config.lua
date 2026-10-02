@@ -5,7 +5,6 @@ local Config = {}
 
 function Config.create(projectRoot)
     local targetName = 'T2'
-    local executionMode = 'connector_replay' -- Modes: 'prescribed_motion' or 'connector_replay'
     local executionMode = 'rrt_replay'
 
     assert(
@@ -25,8 +24,8 @@ function Config.create(projectRoot)
         targetPath = '/Anatomy_V0/target_' .. targetName,
         startPosition = {0, 0, 0.075},
 
-        runLabel = 'V0_B_' .. targetName,
-        executionMode = executionMode,
+        runLabel = 'V0_B_O1_' .. targetName,
+        runNote = 'O1 RRT detour test with obstacle clearance',
 
         method = ({
             prescribed_motion = 'prescribed_motion_ik',
@@ -63,6 +62,11 @@ function Config.create(projectRoot)
         rrtGoalBias = 0.15,
         rrtMaxIterations = 500,
         rrtSeed = 42,
+
+        obstacleEnabled = true,
+        obstaclePath = '/Anatomy_V0/Obstacle_O1',
+        minObstacleClearance = 0.001,
+        executionMode = executionMode,
     }
 end
 

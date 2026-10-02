@@ -91,6 +91,35 @@ function Validation:measureState()
     return rcmError, tipError, clearance, entryOnShaft, collision
 end
 
+function Validation:measureObstacle()
+    if not self.config.obstacleEnabled then
+        return nil, false
+    end
+
+    local sim = self.sim
+    local objects = self.objects
+
+    assert(objects.obstacle ~= nil, 'Obstacle handle is missing')
+
+    local collision = sim.checkCollision(
+        objects.robotCollection,
+        objects.obstacle
+    ) > 0
+
+    local result, data = sim.checkDistance(
+        objects.shaft,
+        objects.obstacle,
+        0
+    )
+
+    local clearance = nil
+    if result > 0 then
+        clearance = data[7]
+    end
+
+    return clearance, collision
+end
+
 function Validation:checkState(checkTracking)
     local rcm, tipError, clearance, onShaft, collision =
         self:measureState()
@@ -124,6 +153,28 @@ function Validation:checkState(checkTracking)
         return false, string.format(
             'Shaft-wall clearance = %.4f mm.', 1000*clearance
         )
+    end
+
+        if self.config.obstacleEnabled then
+        local obstacleClearance, obstacleCollision =
+            self:measureObstacle()
+
+        if obstacleCollision then
+            return false, 'Robot-obstacle collision.'
+        end
+
+        if obstacleClearance == nil
+            or obstacleClearance ~= obstacleClearance
+            or math.abs(obstacleClearance) == math.huge then
+            return false, 'Shaft-obstacle distance is unavailable or invalid.'
+        end
+
+        if obstacleClearance < self.config.minObstacleClearance then
+            return false, string.format(
+                'Shaft-obstacle clearance = %.4f mm.',
+                1000 * obstacleClearance
+            )
+        end
     end
 
     return true
