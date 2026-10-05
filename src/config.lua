@@ -33,7 +33,7 @@ function Config.create(projectRoot)
             rrt_replay = 'rrt_task_space_ik',
         })[executionMode],
 
-        runNote = 'First RRT T2 test without added obstacles',
+        runNote = 'O1 RRT detour with planning time and path length measurements',
 
         duration = 16,
 

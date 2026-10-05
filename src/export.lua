@@ -60,8 +60,24 @@ function Export.new(config, runDirectory, logger)
     self.maxRcmError = 0
     self.maxTipError = 0
     self.minClearance = math.huge
+    self.tipPathLength = 0
+    self.referencePathLength = 0
 
+    self.previousTipPosition = nil
+    self.previousTargetPosition = nil
     return self
+end
+
+local function distance3(a, b)
+    return math.sqrt(
+        (b[1] - a[1])^2
+        + (b[2] - a[2])^2
+        + (b[3] - a[3])^2
+    )
+end
+
+local function copyPosition(position)
+    return {position[1], position[2], position[3]}
 end
 
 function Export:record(state)
@@ -113,6 +129,22 @@ function Export:record(state)
         row[#row + 1] = ''
         row[#row + 1] = ''
     end
+
+    if self.previousTipPosition ~= nil then
+        self.tipPathLength = self.tipPathLength + distance3(
+            self.previousTipPosition,
+            state.tipPosition
+        )
+
+        self.referencePathLength =
+            self.referencePathLength + distance3(
+                self.previousTargetPosition,
+                state.targetPosition
+            )
+    end
+
+    self.previousTipPosition = copyPosition(state.tipPosition)
+    self.previousTargetPosition = copyPosition(state.targetPosition)
 
     self.rows[#self.rows + 1] = row
 
@@ -444,6 +476,40 @@ function Export:write(context)
                 }
             end
         end
+    end
+
+    if context.planningWallTime ~= nil then
+        summary[#summary + 1] = {
+            'planning_wall_time_s',
+            context.planningWallTime
+        }
+
+        summary[#summary + 1] = {
+            'planning_time_scope',
+            'RRT.plan including connections and path reconstruction'
+        }
+    end
+
+    if self.count > 0 then
+        summary[#summary + 1] = {
+            'recorded_tip_path_length_m',
+            self.tipPathLength
+        }
+
+        summary[#summary + 1] = {
+            'recorded_reference_path_length_m',
+            self.referencePathLength
+        }
+
+        summary[#summary + 1] = {
+            'path_length_definition',
+            'sum of Euclidean distances between consecutive recorded positions'
+        }
+
+        summary[#summary + 1] = {
+            'recorded_path_complete',
+            context.status == 'completed' and 1 or 0
+        }
     end
 
     writeCsv(stem .. '_summary.csv', {'parameter', 'value'}, summary)

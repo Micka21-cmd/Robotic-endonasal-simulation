@@ -218,6 +218,8 @@ function Experiment:initialize()
 
         local startPose = sim.getObjectPose(self.tip, self.anatomy)
 
+        local planningStartedAt = sim.getSystemTime()
+
         connection = self.modules.RRT.plan(
             beforeQ,
             startPose,
@@ -225,6 +227,14 @@ function Experiment:initialize()
             self.localConnector,
             config
         )
+
+        self.planningWallTime =
+            sim.getSystemTime() - planningStartedAt
+
+        self:message(string.format(
+            'RRT planning wall time: %.6f s.',
+            self.planningWallTime
+        ))
 
         self.plannerStats = connection.stats
 
@@ -737,6 +747,16 @@ function Experiment:complete()
         1000*finalError
     ))
 
+    self:message(string.format(
+        'Recorded tip path length: %.4f mm.',
+        1000 * self.recorder.tipPathLength
+    ))
+
+    self:message(string.format(
+        'Recorded reference path length: %.4f mm.',
+        1000 * self.recorder.referencePathLength
+    ))
+
     self.status = 'completed'
     self.reason = 'Target reached; sampled checks passed'
 end
@@ -760,6 +780,7 @@ function Experiment:exportRun()
         plannerStats = self.plannerStats,
         obstaclePose = self.initialObstaclePose,
         obstacleDimensions = self.obstacleDimensions,
+        planningWallTime = self.planningWallTime,
     })
 end
 
