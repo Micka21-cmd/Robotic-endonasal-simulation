@@ -512,6 +512,38 @@ function Export:write(context)
         }
     end
 
+    summary[#summary + 1] = {
+        'planning_profile_enabled',
+        config.profilePlanning and 1 or 0
+    }
+
+    if context.planningProfile then
+        summary[#summary + 1] = {
+            'planning_profile_scope',
+            'RRT.plan only; replay and CSV export excluded'
+        }
+
+        for _, row in ipairs(context.planningProfile) do
+            local prefix = 'profile_' .. row.name
+
+            summary[#summary + 1] = {
+                prefix .. '_calls', row.calls
+            }
+
+            summary[#summary + 1] = {
+                prefix .. '_inclusive_s', row.inclusive
+            }
+
+            summary[#summary + 1] = {
+                prefix .. '_exclusive_s', row.exclusive
+            }
+
+            summary[#summary + 1] = {
+                prefix .. '_lua_errors', row.errors
+            }
+        end
+    end
+
     writeCsv(stem .. '_summary.csv', {'parameter', 'value'}, summary)
     self:writeConnector(stem, runId, context)
 

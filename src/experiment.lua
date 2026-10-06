@@ -45,6 +45,96 @@ function Experiment:abort(reason)
     self.sim.pauseSimulation()
 end
 
+function Experiment:profilePlanning(work)
+    local sim = self.sim
+    local originalValidatorSim = self.validator.sim
+
+    -- Separate labels for the four geometric queries.
+    local queries = {
+        collision_wall = originalValidatorSim.checkCollision,
+        distance_wall = originalValidatorSim.checkDistance,
+        collision_obstacle = originalValidatorSim.checkCollision,
+        distance_obstacle = originalValidatorSim.checkDistance,
+    }
+
+    -- Only the validator receives this proxy.
+    -- The global sim API is not modified.
+    local proxy = setmetatable({}, {
+        __index = originalValidatorSim
+    })
+
+    proxy.checkCollision = function(a, b, ...)
+        if b == self.wall then
+            return queries.collision_wall(a, b, ...)
+        elseif b == self.obstacle then
+            return queries.collision_obstacle(a, b, ...)
+        end
+
+        return originalValidatorSim.checkCollision(a, b, ...)
+    end
+
+    proxy.checkDistance = function(a, b, ...)
+        if b == self.wall then
+            return queries.distance_wall(a, b, ...)
+        elseif b == self.obstacle then
+            return queries.distance_obstacle(a, b, ...)
+        end
+
+        return originalValidatorSim.checkDistance(a, b, ...)
+    end
+
+    local targets = {}
+
+    local function add(owner, key, name)
+        targets[#targets + 1] = {
+            owner = owner,
+            key = key,
+            name = name,
+        }
+    end
+
+    add(self.localConnector, 'connect', 'connector_total')
+    add(self.ikSolver, 'solveCandidate', 'ik_solve')
+    add(self.ikSolver, 'syncFromScene', 'ik_sync')
+    add(self.robot, 'setConfiguration', 'robot_set')
+    add(self.modules.SegmentValidation, 'check', 'segment_check')
+    add(self.validator, 'checkJoints', 'joint_check')
+    add(self.validator, 'checkState', 'state_check')
+    add(self.validator, 'measureState', 'measure_wall_state')
+    add(self.validator, 'measureObstacle', 'measure_obstacle')
+
+    for _, name in ipairs({
+        'collision_wall',
+        'distance_wall',
+        'collision_obstacle',
+        'distance_obstacle',
+    }) do
+        add(queries, name, name)
+    end
+
+    self.validator.sim = proxy
+
+    local ok, rows, result = pcall(function()
+        return self.modules.Profiler.run(
+            function()
+                return sim.getSystemTime()
+            end,
+            targets,
+            work
+        )
+    end)
+
+    -- Restore the validator API even if profiling or planning fails.
+    self.validator.sim = originalValidatorSim
+
+    if not ok then
+        error(rows, 0)
+    end
+
+    self.planningProfile = rows
+    return result
+end
+
 function Experiment:initialize()
     local sim = self.sim
     local config = self.config
@@ -218,24 +308,46 @@ function Experiment:initialize()
 
         local startPose = sim.getObjectPose(self.tip, self.anatomy)
 
+        local function plan()
+            return self.modules.RRT.plan(
+                beforeQ,
+                startPose,
+                self.goalPosition,
+                self.localConnector,
+                config
+            )
+        end
+
         local planningStartedAt = sim.getSystemTime()
 
-        connection = self.modules.RRT.plan(
-            beforeQ,
-            startPose,
-            self.goalPosition,
-            self.localConnector,
-            config
-        )
+        if config.profilePlanning then
+            connection = self:profilePlanning(plan)
+        else
+            connection = plan()
+        end
 
         self.planningWallTime =
             sim.getSystemTime() - planningStartedAt
 
         self:message(string.format(
-            'RRT planning wall time: %.6f s.',
-            self.planningWallTime
+            'RRT planning wall time: %.6f s; profiling=%s.',
+            self.planningWallTime,
+            config.profilePlanning and 'on' or 'off'
         ))
 
+        if self.planningProfile then
+            for _, row in ipairs(self.planningProfile) do
+                self:message(string.format(
+                    'PROFILE %s: calls=%d; inclusive=%.6f s; '
+                        .. 'exclusive=%.6f s; Lua errors=%d.',
+                    row.name,
+                    row.calls,
+                    row.inclusive,
+                    row.exclusive,
+                    row.errors
+                ))
+            end
+        end
         self.plannerStats = connection.stats
 
         self:message(string.format(
@@ -252,6 +364,45 @@ function Experiment:initialize()
             beforeQ,
             self.goalPosition
         )
+    end
+
+    -- Temporary prerequisite test for RRT* node connections.
+    -- Outside the RRT planning timer and planner statistics.
+    if connection.success and #connection.path >= 2 then
+        local startQ = connection.path[1]
+        local goalQ = connection.path[2]
+
+        local probe = self.localConnector:connectConfiguration(
+            startQ,
+            goalQ
+        )
+
+        assert(
+            probe.success,
+            'Fixed-node connector test failed: '
+                .. tostring(probe.reason)
+        )
+
+        local reachedQ = probe.path[#probe.path]
+        local endpointError = 0
+
+        for i = 1, #goalQ do
+            endpointError = math.max(
+                endpointError,
+                math.abs(reachedQ[i] - goalQ[i])
+            )
+        end
+
+        assert(endpointError == 0,
+            'Fixed-node connector did not preserve the destination')
+
+        self:message(string.format(
+            'Fixed-node connector: PASS; endpoint error=%.3e rad; '
+                .. 'correction=%.6f deg; configurations=%d.',
+            endpointError,
+            math.deg(probe.endpointCorrectionRad),
+            #probe.path
+        ))
     end
 
     -- Measure restoration before any further scene changes.
@@ -781,6 +932,7 @@ function Experiment:exportRun()
         obstaclePose = self.initialObstaclePose,
         obstacleDimensions = self.obstacleDimensions,
         planningWallTime = self.planningWallTime,
+        planningProfile = self.planningProfile,
     })
 end
 

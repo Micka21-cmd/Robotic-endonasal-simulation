@@ -10,6 +10,38 @@ local function norm(vector)
     )
 end
 
+-- A bounded query can establish a lower bound without an exact distance.
+local function queryDistance(sim, first, second, threshold)
+    threshold = threshold or 0
+
+    assert(
+        type(threshold) == 'number'
+            and threshold == threshold
+            and threshold >= 0
+            and threshold < math.huge,
+        'Distance threshold must be finite and non-negative'
+    )
+
+    local result, data = sim.checkDistance(first, second, threshold)
+
+    if result == 0 and threshold > 0 then
+        return nil, true
+    end
+
+    if result == 1 and type(data) == 'table' then
+        local distance = data[7]
+
+        if type(distance) == 'number'
+            and distance == distance
+            and distance >= 0
+            and distance < math.huge then
+            return distance, false
+        end
+    end
+
+    return nil, false
+end
+
 function Validation.new(simApi, robot, objects, config)
     local self = setmetatable({}, Validation)
 
@@ -51,7 +83,7 @@ function Validation:checkJoints(candidate, previous)
     return true
 end
 
-function Validation:measureState()
+function Validation:measureState(distanceThreshold)
     local sim = self.sim
     local objects = self.objects
 
@@ -77,21 +109,18 @@ function Validation:measureState()
         objects.wall
     ) > 0
 
-    local result, data = sim.checkDistance(
+    local clearance, beyondThreshold = queryDistance(
+        sim,
         objects.shaft,
         objects.wall,
-        0
+        distanceThreshold
     )
 
-    local clearance = nil
-    if result > 0 then
-        clearance = data[7]
-    end
-
-    return rcmError, tipError, clearance, entryOnShaft, collision
+    return rcmError, tipError, clearance,
+        entryOnShaft, collision, beyondThreshold
 end
 
-function Validation:measureObstacle()
+function Validation:measureObstacle(distanceThreshold)
     if not self.config.obstacleEnabled then
         return nil, false
     end
@@ -106,23 +135,20 @@ function Validation:measureObstacle()
         objects.obstacle
     ) > 0
 
-    local result, data = sim.checkDistance(
+    local clearance, beyondThreshold = queryDistance(
+        sim,
         objects.shaft,
         objects.obstacle,
-        0
+        distanceThreshold
     )
 
-    local clearance = nil
-    if result > 0 then
-        clearance = data[7]
-    end
+    return clearance, collision, beyondThreshold
 
-    return clearance, collision
 end
 
 function Validation:checkState(checkTracking)
-    local rcm, tipError, clearance, onShaft, collision =
-        self:measureState()
+    local rcm, tipError, clearance, onShaft, collision, wallBeyondThreshold =
+        self:measureState(self.config.minClearance)
 
     if not onShaft then
         return false, 'RCM lies outside the physical shaft length.'
@@ -132,44 +158,43 @@ function Validation:checkState(checkTracking)
         return false, 'Robot-corridor collision.'
     end
 
-    if clearance == nil then
+    if clearance == nil and not wallBeyondThreshold then
         return false, 'Shaft-wall distance is unavailable.'
     end
 
     if rcm > self.config.maxRcmError then
         return false, string.format(
-            'RCM error = %.4f mm.', 1000*rcm
+            'RCM error = %.4f mm.', 1000 * rcm
         )
     end
 
     if checkTracking ~= false
         and tipError > self.config.maxTipError then
         return false, string.format(
-            'Tip tracking error = %.4f mm.', 1000*tipError
+            'Tip tracking error = %.4f mm.', 1000 * tipError
         )
     end
 
-    if clearance < self.config.minClearance then
+    if clearance ~= nil and clearance < self.config.minClearance then
         return false, string.format(
-            'Shaft-wall clearance = %.4f mm.', 1000*clearance
+            'Shaft-wall clearance = %.4f mm.', 1000 * clearance
         )
     end
 
-        if self.config.obstacleEnabled then
-        local obstacleClearance, obstacleCollision =
-            self:measureObstacle()
+    if self.config.obstacleEnabled then
+        local obstacleClearance, obstacleCollision, obstacleBeyondThreshold =
+            self:measureObstacle(self.config.minObstacleClearance)
 
         if obstacleCollision then
             return false, 'Robot-obstacle collision.'
         end
 
-        if obstacleClearance == nil
-            or obstacleClearance ~= obstacleClearance
-            or math.abs(obstacleClearance) == math.huge then
+        if obstacleClearance == nil and not obstacleBeyondThreshold then
             return false, 'Shaft-obstacle distance is unavailable or invalid.'
         end
 
-        if obstacleClearance < self.config.minObstacleClearance then
+        if obstacleClearance ~= nil
+            and obstacleClearance < self.config.minObstacleClearance then
             return false, string.format(
                 'Shaft-obstacle clearance = %.4f mm.',
                 1000 * obstacleClearance

@@ -25,7 +25,6 @@ function Config.create(projectRoot)
         startPosition = {0, 0, 0.075},
 
         runLabel = 'V0_B_O1_' .. targetName,
-        runNote = 'O1 RRT detour test with obstacle clearance',
 
         method = ({
             prescribed_motion = 'prescribed_motion_ik',
@@ -33,7 +32,7 @@ function Config.create(projectRoot)
             rrt_replay = 'rrt_task_space_ik',
         })[executionMode],
 
-        runNote = 'O1 RRT detour with planning time and path length measurements',
+        runNote = 'O1 RRT planning profile; unchanged validation settings',
 
         duration = 16,
 
@@ -67,6 +66,8 @@ function Config.create(projectRoot)
         obstaclePath = '/Anatomy_V0/Obstacle_O1',
         minObstacleClearance = 0.001,
         executionMode = executionMode,
+
+        profilePlanning = true,
     }
 end
 

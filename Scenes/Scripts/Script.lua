@@ -21,7 +21,8 @@ local modules = {
     Export = loadModule('export'),
     SegmentValidation = loadModule('segment_validation'),
     RRT = loadModule('rrt'),
-    LocalConnector = loadModule('local_connector')
+    LocalConnector = loadModule('local_connector'),
+    Profiler = loadModule('profiler'),
 }
 
 
