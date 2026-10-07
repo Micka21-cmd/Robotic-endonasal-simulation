@@ -94,6 +94,7 @@ function Experiment:profilePlanning(work)
     end
 
     add(self.localConnector, 'connect', 'connector_total')
+    add(self.localConnector, 'connectConfiguration', 'connector_fixed_total')
     add(self.ikSolver, 'solveCandidate', 'ik_solve')
     add(self.ikSolver, 'syncFromScene', 'ik_sync')
     add(self.robot, 'setConfiguration', 'robot_set')
@@ -142,7 +143,8 @@ function Experiment:initialize()
     assert(
         config.executionMode == 'prescribed_motion'
             or config.executionMode == 'connector_replay'
-            or config.executionMode == 'rrt_replay',
+            or config.executionMode == 'rrt_replay'
+            or config.executionMode == 'rrt_star_replay',
         'Unsupported execution mode'
     )
 
@@ -299,72 +301,71 @@ function Experiment:initialize()
 
     local connection
 
-    if config.executionMode == 'rrt_replay' then
+    if config.executionMode == 'rrt_replay'
+        or config.executionMode == 'rrt_star_replay' then
+        local isStar = config.executionMode == 'rrt_star_replay'
+        local plannerName = isStar and 'RRT*' or 'RRT'
+        local planner = isStar and self.modules.RRTStar or self.modules.RRT
+        assert(planner, 'Planner module was not loaded: ' .. plannerName)
+
         self:message(string.format(
-            'RRT planning: seed=%d; iteration budget=%d.',
-            config.rrtSeed,
-            config.rrtMaxIterations
+            '%s planning: seed=%d; iteration budget=%d.',
+            plannerName, config.rrtSeed, config.rrtMaxIterations
         ))
-
         local startPose = sim.getObjectPose(self.tip, self.anatomy)
-
         local function plan()
-            return self.modules.RRT.plan(
-                beforeQ,
-                startPose,
-                self.goalPosition,
-                self.localConnector,
-                config
+            return planner.plan(
+                beforeQ, startPose, self.goalPosition,
+                self.localConnector, config,
+                {log = function(text) self:message(text) end}
             )
         end
-
         local planningStartedAt = sim.getSystemTime()
-
         if config.profilePlanning then
             connection = self:profilePlanning(plan)
         else
             connection = plan()
         end
-
-        self.planningWallTime =
-            sim.getSystemTime() - planningStartedAt
+        self.planningWallTime = sim.getSystemTime() - planningStartedAt
+        self.plannerStats = connection.stats
+        self.plannerCostHistory = connection.costHistory
 
         self:message(string.format(
-            'RRT planning wall time: %.6f s; profiling=%s.',
-            self.planningWallTime,
+            '%s planning wall time: %.6f s; profiling=%s.',
+            plannerName, self.planningWallTime,
             config.profilePlanning and 'on' or 'off'
         ))
-
         if self.planningProfile then
             for _, row in ipairs(self.planningProfile) do
                 self:message(string.format(
                     'PROFILE %s: calls=%d; inclusive=%.6f s; '
                         .. 'exclusive=%.6f s; Lua errors=%d.',
-                    row.name,
-                    row.calls,
-                    row.inclusive,
-                    row.exclusive,
-                    row.errors
+                    row.name, row.calls, row.inclusive, row.exclusive, row.errors
                 ))
             end
         end
-        self.plannerStats = connection.stats
-
+        local stats = connection.stats
         self:message(string.format(
-            'RRT result: %s; iterations=%d; nodes=%d; '
+            '%s result: %s; iterations=%d; nodes=%d; '
                 .. 'connector calls=%d; rejected connections=%d.',
-            connection.success and 'SUCCESS' or 'FAILED',
-            connection.stats.iterations,
-            connection.stats.nodes,
-            connection.stats.connector_calls,
-            connection.stats.rejected_connections
+            plannerName, connection.success and 'SUCCESS' or 'FAILED',
+            stats.iterations, stats.nodes, stats.connector_calls,
+            stats.rejected_connections
         ))
+        if isStar then
+            self:message(string.format(
+                'RRT* optimization: parent changes=%d; rewires=%d; '
+                    .. 'descendant updates=%d; improvements=%d; best=%s mm.',
+                stats.parent_changes, stats.rewires, stats.descendant_cost_updates,
+                stats.solution_improvements,
+                stats.best_cost_m and string.format('%.6f', 1000 * stats.best_cost_m)
+                    or 'none'
+            ))
+        end
     else
-        connection = self.localConnector:connect(
-            beforeQ,
-            self.goalPosition
-        )
+        connection = self.localConnector:connect(beforeQ, self.goalPosition)
     end
+
 
     -- Temporary prerequisite test for RRT* node connections.
     -- Outside the RRT planning timer and planner statistics.
@@ -933,6 +934,7 @@ function Experiment:exportRun()
         obstacleDimensions = self.obstacleDimensions,
         planningWallTime = self.planningWallTime,
         planningProfile = self.planningProfile,
+        plannerCostHistory = self.plannerCostHistory,
     })
 end
 

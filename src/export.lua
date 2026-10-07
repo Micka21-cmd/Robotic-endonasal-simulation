@@ -216,8 +216,10 @@ function Export:writeConnector(stem, runId, context)
 
     local config = self.config
 
-    local prefix = config.executionMode == 'rrt_replay'
-    and '_rrt' or '_connector'
+    local prefix = ({
+        rrt_replay = '_rrt',
+        rrt_star_replay = '_rrt_star',
+    })[config.executionMode] or '_connector'
 
     local pathFile = stem .. prefix .. '_path.csv'
     local summaryFile = stem .. prefix .. '_summary.csv'
@@ -275,6 +277,8 @@ end
 
 function Export:write(context)
     local config = self.config
+    local plannerScope = config.executionMode == 'rrt_star_replay'
+        and 'RRTStar.plan' or 'RRT.plan'
     local startedAt = context.startedAt or os.time()
 
     local runDir, runId = self.runDirectory.create(
@@ -391,6 +395,9 @@ function Export:write(context)
     if context.plannerStats then
         local stats = context.plannerStats
 
+        local statsPrefix = context.executionMode == 'rrt_star_replay'
+            and 'rrt_star_' or 'rrt_'
+
         for _, name in ipairs({
             'seed',
             'iterations',
@@ -399,7 +406,7 @@ function Export:write(context)
             'rejected_connections',
         }) do
             summary[#summary + 1] = {
-                'rrt_' .. name, stats[name]
+                statsPrefix .. name, stats[name]
             }
         end
 
@@ -486,7 +493,7 @@ function Export:write(context)
 
         summary[#summary + 1] = {
             'planning_time_scope',
-            'RRT.plan including connections and path reconstruction'
+            plannerScope .. ' including connections and path reconstruction'
         }
     end
 
@@ -520,7 +527,7 @@ function Export:write(context)
     if context.planningProfile then
         summary[#summary + 1] = {
             'planning_profile_scope',
-            'RRT.plan only; replay and CSV export excluded'
+            plannerScope .. ' only; replay and CSV export excluded'
         }
 
         for _, row in ipairs(context.planningProfile) do
@@ -542,6 +549,40 @@ function Export:write(context)
                 prefix .. '_lua_errors', row.errors
             }
         end
+    end
+
+    if context.executionMode == 'rrt_star_replay' and context.plannerStats then
+        local stats = context.plannerStats
+        for _, name in ipairs({
+            'fixed_connector_calls', 'parent_changes', 'rewires',
+            'descendant_cost_updates', 'goal_connections', 'goal_candidates',
+            'solution_improvements', 'out_of_bounds_extensions',
+            'first_solution_iteration', 'first_solution_connector_calls',
+            'first_solution_cost_m', 'best_cost_m', 'last_radius_m',
+            'cost_definition', 'stop_reason',
+        }) do
+            local value = stats[name]
+            if value == nil then value = 'not_applicable' end
+            summary[#summary + 1] = {'rrt_star_' .. name, value}
+        end
+        summary[#summary + 1] = {
+            'rrt_star_radius_max_m', config.rrtStarRadiusMaxM
+        }
+        summary[#summary + 1] = {
+            'rrt_star_gamma_m', config.rrtStarGammaM
+        }
+        summary[#summary + 1] = {
+            'rrt_star_neighbour_dimension', 3
+        }
+        summary[#summary + 1] = {
+            'rrt_star_cost_history_policy', 'first_solution_and_strict_improvements'
+        }
+        local historyFile = stem .. '_rrt_star_cost_history.csv'
+        writeCsv(historyFile,
+            {'iteration', 'connector_calls', 'best_cost_m'},
+            context.plannerCostHistory or {}
+        )
+        self.logger('RRT* cost history export: ' .. historyFile)
     end
 
     writeCsv(stem .. '_summary.csv', {'parameter', 'value'}, summary)

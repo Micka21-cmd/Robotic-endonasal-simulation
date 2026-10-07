@@ -23,6 +23,7 @@ local modules = {
     RRT = loadModule('rrt'),
     LocalConnector = loadModule('local_connector'),
     Profiler = loadModule('profiler'),
+    RRTStar = loadModule('rrt_star'),
 }
 
 

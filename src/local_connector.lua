@@ -114,6 +114,7 @@ function LocalConnector:connect(startQ, goalPosition)
         end
 
         local path = {copy(startQ)}
+        local tipPositions = {copy(startPosition)}
         -- The initial reference is the actual entry tip pose.
         -- Subsequent references are the Cartesian commands used by IK.
         local targetPoses = {
@@ -180,6 +181,9 @@ function LocalConnector:connect(startQ, goalPosition)
 
             path[#path + 1] = copy(candidate)
             targetPoses[#targetPoses + 1] = copy(pose)
+            tipPositions[#tipPositions + 1] = copy(sim.getObjectPosition(
+                objects.tip, objects.anatomy
+            ))
             previousQ = copy(candidate)
         end
 
@@ -187,6 +191,7 @@ function LocalConnector:connect(startQ, goalPosition)
             success = true,
             path = path,
             targetPoses = targetPoses,
+            tipPositions = tipPositions,
             reachedPosition = copy(sim.getObjectPosition(
                 objects.tip, objects.anatomy
             )),
@@ -208,130 +213,62 @@ function LocalConnector:connect(startQ, goalPosition)
     return result
 end
 
--- Connect to a fixed joint-space node, preserving its configuration.
+-- Connect to an existing node without changing its joint configuration.
+-- The short endpoint correction is checked with the same joint/state/segment rules.
 function LocalConnector:connectConfiguration(startQ, goalQ)
-    local sim = self.sim
-    local objects = self.objects
-    local config = self.config
-
-    assert(#goalQ == #self.robot.joints,
-        'Invalid goal configuration size')
-
+    local sim, objects = self.sim, self.objects
+    assert(#goalQ == #self.robot.joints, 'Invalid goal configuration size')
     for i = 1, #goalQ do
-        assert(isFinite(goalQ[i]),
-            'Goal joint values must be finite')
+        assert(isFinite(goalQ[i]), 'Goal joint values must be finite')
     end
-
     local originalQ = self.robot:readConfiguration()
-    local originalTarget = sim.getObjectPose(
-        objects.target, sim.handle_world
-    )
-
+    local originalTarget = sim.getObjectPose(objects.target, sim.handle_world)
     local executed, result = pcall(function()
-        local valid, reason =
-            self.validator:checkJoints(goalQ, goalQ)
-
-        if not valid then
-            return {success = false, reason = reason}
-        end
-
-        -- Measure and validate the fixed destination.
+        local valid, reason = self.validator:checkJoints(goalQ, goalQ)
+        if not valid then return {success = false, reason = reason} end
         self.robot:setConfiguration(goalQ)
-
         valid, reason = self.validator:checkState(false)
-        if not valid then
-            return {success = false, reason = reason}
-        end
-
-        local goalPose = copy(sim.getObjectPose(
-            objects.tip, objects.anatomy
-        ))
-
-        local goalPosition = {
-            goalPose[1], goalPose[2], goalPose[3]
-        }
-
+        if not valid then return {success = false, reason = reason} end
+        local goalPose = sim.getObjectPose(objects.tip, objects.anatomy)
+        local goalPosition = {goalPose[1], goalPose[2], goalPose[3]}
         local edge = self:connect(startQ, goalPosition)
-        if not edge.success then
-            return edge
-        end
-
+        if not edge.success then return edge end
         local lastQ = edge.path[#edge.path]
         local gap = 0
-
-        for i = 1, #goalQ do
-            gap = math.max(
-                gap,
-                math.abs(goalQ[i] - lastQ[i])
-            )
-        end
-
-        -- Never replace the IK endpoint without checking the correction.
+        for i = 1, #goalQ do gap = math.max(gap, math.abs(goalQ[i] - lastQ[i])) end
         valid, reason = self.validator:checkJoints(goalQ, lastQ)
-
         if not valid then
-            return {
-                success = false,
-                reason = 'Node endpoint correction rejected: ' .. reason,
-            }
+            return {success = false, reason = 'Endpoint correction: ' .. tostring(reason)}
         end
-
         self.robot:setConfiguration(lastQ)
-        sim.setObjectPose(
-            objects.target, goalPose, objects.anatomy
-        )
-
+        sim.setObjectPose(objects.target, goalPose, objects.anatomy)
         valid, reason = self.modules.SegmentValidation.check(
-            self.robot,
-            self.validator,
-            lastQ,
-            goalQ,
-            config.segmentResolutionRad
+            self.robot, self.validator, lastQ, goalQ,
+            self.config.segmentResolutionRad
         )
-
         if not valid then
-            return {
-                success = false,
-                reason = 'Node endpoint segment rejected: ' .. reason,
-            }
+            return {success = false, reason = 'Endpoint segment: ' .. tostring(reason)}
         end
-
         self.robot:setConfiguration(goalQ)
-
         valid, reason = self.validator:checkState()
         if not valid then
-            return {success = false, reason = reason}
+            return {success = false, reason = 'Endpoint state: ' .. tostring(reason)}
         end
-
+        local reached = copy(sim.getObjectPosition(objects.tip, objects.anatomy))
         if gap > 0 then
             edge.path[#edge.path + 1] = copy(goalQ)
             edge.targetPoses[#edge.targetPoses + 1] = copy(goalPose)
+            edge.tipPositions[#edge.tipPositions + 1] = copy(reached)
         end
-
-        edge.reachedPosition = copy(sim.getObjectPosition(
-            objects.tip, objects.anatomy
-        ))
-
+        edge.reachedPosition = reached
         edge.endpointCorrectionRad = gap
-        edge.reason =
-            'Fixed configuration reached through sampled valid connections.'
-
+        edge.reason = 'Fixed-configuration connection passed sampled checks.'
         return edge
     end)
-
-    -- Restore the caller's scene after success, rejection or Lua error.
     self.robot:setConfiguration(originalQ)
-
-    sim.setObjectPose(
-        objects.target, originalTarget, sim.handle_world
-    )
-
+    sim.setObjectPose(objects.target, originalTarget, sim.handle_world)
     self.ikSolver:syncFromScene()
-
-    if not executed then
-        error(result, 0)
-    end
-
+    if not executed then error(result, 0) end
     return result
 end
 

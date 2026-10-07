@@ -5,7 +5,7 @@ local Config = {}
 
 function Config.create(projectRoot)
     local targetName = 'T2'
-    local executionMode = 'rrt_replay'
+    local executionMode = 'rrt_star_replay'
 
     assert(
         targetName == 'T1' or targetName == 'T2',
@@ -14,7 +14,8 @@ function Config.create(projectRoot)
     assert(
         executionMode == 'prescribed_motion'
             or executionMode == 'connector_replay'
-            or executionMode == 'rrt_replay',
+            or executionMode == 'rrt_replay'
+            or executionMode == 'rrt_star_replay',
         'Unsupported execution mode'
     )
     return {
@@ -30,9 +31,10 @@ function Config.create(projectRoot)
             prescribed_motion = 'prescribed_motion_ik',
             connector_replay = 'local_connector_replay',
             rrt_replay = 'rrt_task_space_ik',
+            rrt_star_replay = 'rrt_star_task_space_ik',
         })[executionMode],
 
-        runNote = 'O1 RRT planning profile; unchanged validation settings',
+        runNote = 'O1 RRT-star integration test; seed 42; 20 iterations',
 
         duration = 16,
 
@@ -59,8 +61,10 @@ function Config.create(projectRoot)
 
         rrtExtensionM = 0.001,
         rrtGoalBias = 0.15,
-        rrtMaxIterations = 500,
+        rrtMaxIterations = 20,
         rrtSeed = 42,
+        rrtStarRadiusMaxM = 0.0015, -- rayon maximal : 1,5 mm
+        rrtStarGammaM = 0.003,     -- coefficient du rayon décroissant : 3 mm
 
         obstacleEnabled = true,
         obstaclePath = '/Anatomy_V0/Obstacle_O1',
