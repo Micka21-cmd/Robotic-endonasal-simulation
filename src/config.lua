@@ -34,7 +34,7 @@ function Config.create(projectRoot)
             rrt_star_replay = 'rrt_star_task_space_ik',
         })[executionMode],
 
-        runNote = 'O1 RRT-star integration test; seed 42; 20 iterations',
+        runNote = 'O1 RRT-star budget extension; seed 42; 50 iterations',
 
         duration = 16,
 
@@ -61,7 +61,7 @@ function Config.create(projectRoot)
 
         rrtExtensionM = 0.001,
         rrtGoalBias = 0.15,
-        rrtMaxIterations = 20,
+        rrtMaxIterations = 50,
         rrtSeed = 42,
         rrtStarRadiusMaxM = 0.0015, -- rayon maximal : 1,5 mm
         rrtStarGammaM = 0.003,     -- coefficient du rayon décroissant : 3 mm
