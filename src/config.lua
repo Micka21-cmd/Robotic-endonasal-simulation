@@ -5,7 +5,7 @@ local Config = {}
 
 function Config.create(projectRoot)
     local targetName = 'T2'
-    local executionMode = 'rrt_star_replay'
+    local executionMode = 'rrt_replay'
 
     assert(
         targetName == 'T1' or targetName == 'T2',
@@ -34,8 +34,7 @@ function Config.create(projectRoot)
             rrt_star_replay = 'rrt_star_task_space_ik',
         })[executionMode],
 
-        runNote = 'O1 RRT-star budget extension; seed 42; 50 iterations',
-
+        runNote = 'CMP01; scenario=V0_B_O1_T2; target=T2; planner=RRT; seed=999983; budget=50',
         duration = 16,
 
         maxRcmError = 0.0001,
@@ -62,9 +61,9 @@ function Config.create(projectRoot)
         rrtExtensionM = 0.001,
         rrtGoalBias = 0.15,
         rrtMaxIterations = 50,
-        rrtSeed = 42,
-        rrtStarRadiusMaxM = 0.0015, -- rayon maximal : 1,5 mm
-        rrtStarGammaM = 0.003,     -- coefficient du rayon décroissant : 3 mm
+        rrtSeed = 999983,
+        rrtStarRadiusMaxM = 0.0015, -- maximum radius : 1,5 mm
+        rrtStarGammaM = 0.003,     -- coefficient of decreasing radius : 3 mm
 
         obstacleEnabled = true,
         obstaclePath = '/Anatomy_V0/Obstacle_O1',
@@ -72,6 +71,7 @@ function Config.create(projectRoot)
         executionMode = executionMode,
 
         profilePlanning = true,
+        diagnosticGoalT1 = false,
     }
 end
 

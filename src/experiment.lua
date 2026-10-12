@@ -136,6 +136,135 @@ function Experiment:profilePlanning(work)
     return result
 end
 
+-- Static check of one previously recorded T1 configuration, not a path test.
+function Experiment:diagnoseKnownT1()
+    local sim, config = self.sim, self.config
+    assert(config.targetName == 'T1', 'T1 diagnostic requires targetName=T1')
+    assert(config.obstacleEnabled and self.obstacle ~= nil,
+        'T1 diagnostic requires the current obstacle enabled')
+    assert(norm({self.goalPosition[1] - 0.003,
+        self.goalPosition[2], self.goalPosition[3] - 0.075}) < 1e-6,
+        'Current T1 differs from the reference anatomical position')
+
+    -- Last row (sample 320) of the supplied V0_B_T1_states(4).csv.
+    local goalQ = {
+        -0.00332872669655434, -0.566213262474279,
+        1.13807181493872, -1.03745910130746,
+        0.789170202869579, -1.33906264703047e-15
+    }
+    local referenceTip = {
+        0.00300000166324943, -1.71724534592244e-09,
+        0.0749999970457265
+    }
+    local savedQ = self.robot:readConfiguration()
+    local savedTarget = sim.getObjectPose(self.target, sim.handle_world)
+    local function copy(t)
+        local r = {}; for i,v in ipairs(t) do r[i] = v end; return r
+    end
+    savedQ, savedTarget = copy(savedQ), copy(savedTarget)
+
+    local ok, result = pcall(function()
+        -- Identical arguments check joint limits only, not a move from T0.
+        local jointsValid, jointReason = self.validator:checkJoints(goalQ, goalQ)
+        if not jointsValid then
+            return {jointsValid = false, reason = jointReason}
+        end
+        self.robot:setConfiguration(goalQ)
+        local referencePose = self.modules.Trajectory.poseAt(
+            1, 1, self.goalPosition, self.goalPosition
+        )
+        sim.setObjectPose(self.target, referencePose, self.anatomy)
+        local tipPosition = sim.getObjectPosition(self.tip, self.anatomy)
+        local rcm, tipError, wallClearance, onShaft, wallCollision =
+            self.validator:measureState(0)
+        local obstacleClearance, obstacleCollision =
+            self.validator:measureObstacle(0)
+        local valid, reason = self.validator:checkState()
+        local referenceError = norm({
+            tipPosition[1] - referenceTip[1],
+            tipPosition[2] - referenceTip[2],
+            tipPosition[3] - referenceTip[3]
+        })
+        return {
+            jointsValid = true, valid = valid, reason = reason,
+            tipPosition = tipPosition, referenceError = referenceError,
+            rcm = rcm, tipError = tipError,
+            onShaft = onShaft, wallClearance = wallClearance,
+            wallCollision = wallCollision, obstacleClearance = obstacleClearance,
+            obstacleCollision = obstacleCollision
+        }
+    end)
+
+    -- Attempt every restoration even if one restoration operation throws.
+    local restorationErrors = {}
+    local function restore(label, action)
+        local success, err = pcall(action)
+        if not success then
+            restorationErrors[#restorationErrors + 1] = label .. ': ' .. tostring(err)
+        end
+    end
+    restore('robot', function() self.robot:setConfiguration(savedQ) end)
+    restore('target', function()
+        sim.setObjectPose(self.target, savedTarget, sim.handle_world)
+    end)
+    restore('IK', function() self.ikSolver:syncFromScene() end)
+    assert(#restorationErrors == 0,
+        'T1 diagnostic restoration error: ' .. table.concat(restorationErrors, '; '))
+
+    local afterQ = self.robot:readConfiguration()
+    local afterTarget = sim.getObjectPose(self.target, sim.handle_world)
+    local jointError, positionError, quaternionMinus, quaternionPlus = 0, 0, 0, 0
+    for i = 1, #savedQ do
+        jointError = math.max(jointError, math.abs(afterQ[i] - savedQ[i]))
+    end
+    for i = 1, 3 do positionError = positionError + (afterTarget[i] - savedTarget[i])^2 end
+    for i = 4, 7 do
+        quaternionMinus = quaternionMinus + (afterTarget[i] - savedTarget[i])^2
+        quaternionPlus = quaternionPlus + (afterTarget[i] + savedTarget[i])^2
+    end
+    positionError = math.sqrt(positionError)
+    local quaternionError = math.sqrt(math.min(quaternionMinus, quaternionPlus))
+    local restored = jointError <= 1e-9 and positionError <= 1e-9 and quaternionError <= 1e-9
+    self:message(string.format(
+        'T1 diagnostic restoration: %s; joint=%.3e rad; target=%.3e m; quaternion=%.3e.',
+        restored and 'PASS' or 'FAIL', jointError, positionError, quaternionError
+    ))
+    assert(restored, 'T1 diagnostic restoration mismatch')
+    if not ok then error(result, 0) end
+
+    if not result.jointsValid then
+        self:message('T1 STATIC DIAGNOSTIC: REJECTED; ' .. tostring(result.reason))
+        return result
+    end
+    local function mm(value)
+        if type(value) ~= 'number' or value ~= value or math.abs(value) == math.huge then
+            return 'unavailable'
+        end
+        return string.format('%.9f mm', 1000 * value)
+    end
+    self:message(string.format(
+        'T1 static tip position (Anatomy_V0): [%.9f, %.9f, %.9f] mm.',
+        1000 * result.tipPosition[1], 1000 * result.tipPosition[2], 1000 * result.tipPosition[3]
+    ))
+    self:message('T1 reference-position difference: ' .. mm(result.referenceError))
+    self:message('T1 RCM error: ' .. mm(result.rcm)
+        .. '; tip-to-goal: ' .. mm(result.tipError)
+        .. '; RCM on physical shaft: ' .. tostring(result.onShaft))
+    self:message('T1 shaft-wall clearance: ' .. mm(result.wallClearance)
+        .. '; minimum: ' .. mm(config.minClearance)
+        .. '; robot-wall collision: ' .. tostring(result.wallCollision))
+    self:message('T1 shaft-obstacle clearance: ' .. mm(result.obstacleClearance)
+        .. '; minimum: ' .. mm(config.minObstacleClearance)
+        .. '; robot-obstacle collision: ' .. tostring(result.obstacleCollision))
+    local referenceMatches = result.referenceError <= 1e-6
+    local verdict = not referenceMatches and 'REFERENCE_MISMATCH'
+        or (result.valid and 'ACCEPTED' or 'REJECTED')
+    self:message('T1 STATIC DIAGNOSTIC: ' .. verdict .. '; '
+        .. (result.reason or 'Current state checks passed.')
+        .. ' One stored configuration only; no path was tested.')
+    return result
+end
+
 function Experiment:initialize()
     local sim = self.sim
     local config = self.config
@@ -277,6 +406,18 @@ function Experiment:initialize()
             1000 * clearance,
             1000 * config.minObstacleClearance
         ))
+    end
+
+    -- Temporary static diagnostic; exits before any planning or replay.
+    if config.diagnosticGoalT1 == true then
+        self.diagnosticOnly = true
+        self.running = false
+        local ok, err = pcall(function() self:diagnoseKnownT1() end)
+        if not ok then
+            sim.addLog(sim.verbosity_errors, 'T1 DIAGNOSTIC ERROR: ' .. tostring(err))
+        end
+        sim.stopSimulation()
+        return
     end
 
     self.localConnector = self.modules.LocalConnector.new(
@@ -963,6 +1104,11 @@ function Experiment:cleanup()
             sim.boolparam_dynamics_handling_enabled,
             self.savedDynamics
         )
+    end
+
+    if self.diagnosticOnly then
+        self:message('Static diagnostic finished; no planning/replay CSV exported.')
+        return
     end
 
     local ok, err = pcall(function()
