@@ -1,0 +1,16 @@
+CMP01, V0_B_O1_T2, 10 paired seeds, iteration budget 50.
+Archive reference commit: dddf0799e85e61c08c5207f84a5c642b864a1825
+This commit identifies the archived snapshot, not a verified execution hash for each run.
+Only explicitly listed runs are included. T1/O1 and development runs are excluded.
+RRT stops at first solution; RRT-star uses the full budget. Compute/time budgets are not equal.
+Profiling enabled. Planning wall time includes geometric queries; none is subtracted.
+One waypoint per simulation step is a kinematic replay policy, not physical motion timing.
+CSV checks cover recorded states; they do not establish continuous collision freedom.
+Path lengths are polylines of recorded actual tip positions, not reference positions.
+Equal-cost tolerance for pair counts: 1e-9 mm. No global optimality claim.
+RRT-star shorter: 8/10; equal within tolerance: 2/10.
+Mean paired length reduction: 8.967451 percent.
+Reduction of mean lengths (different statistic): 9.734768 percent.
+Actual execution order is recorded in paired_comparison.csv.
+Seeds 196613 and 314159 used RRT first despite the planned alternating order.
+Geometry mesh identity and source-code identity cannot be established from these CSVs alone.
