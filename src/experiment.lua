@@ -265,6 +265,99 @@ function Experiment:diagnoseKnownT1()
     return result
 end
 
+-- Static endpoint preflight: one IK candidate per goal, no path is tested.
+function Experiment:diagnoseEndpoints()
+    local sim, config = self.sim, self.config
+    local function copy(t)
+        local r = {}; for i, v in ipairs(t) do r[i] = v end; return r
+    end
+    local savedQ = copy(self.robot:readConfiguration())
+    local savedTarget = copy(sim.getObjectPose(self.target, sim.handle_world))
+    local function restore()
+        local errors = {}
+        local function attempt(label, action)
+            local ok, err = pcall(action)
+            if not ok then errors[#errors + 1] = label .. ': ' .. tostring(err) end
+        end
+        attempt('robot', function() self.robot:setConfiguration(savedQ) end)
+        attempt('target', function()
+            sim.setObjectPose(self.target, savedTarget, sim.handle_world)
+        end)
+        attempt('IK', function() self.ikSolver:syncFromScene() end)
+        assert(#errors == 0, table.concat(errors, '; '))
+        local q = self.robot:readConfiguration()
+        local pose = sim.getObjectPose(self.target, sim.handle_world)
+        local dq, dp, qm, qp = 0, 0, 0, 0
+        for i = 1, #savedQ do dq = math.max(dq, math.abs(q[i] - savedQ[i])) end
+        for i = 1, 3 do dp = dp + (pose[i] - savedTarget[i])^2 end
+        for i = 4, 7 do
+            qm = qm + (pose[i] - savedTarget[i])^2
+            qp = qp + (pose[i] + savedTarget[i])^2
+        end
+        dp = math.sqrt(dp)
+        local quaternionError = math.sqrt(math.min(qm, qp))
+        assert(dq <= 1e-9 and dp <= 1e-9 and quaternionError <= 1e-9,
+            'Endpoint preflight restoration mismatch')
+        self:message(string.format(
+            'Endpoint restoration: PASS; joint=%.3e rad; target=%.3e m; quaternion=%.3e.',
+            dq, dp, quaternionError))
+    end
+    local function mm(value)
+        if type(value) ~= 'number' or value ~= value or math.abs(value) == math.huge then
+            return 'unavailable'
+        end
+        return string.format('%.9f mm', 1000 * value)
+    end
+    local accepted = 0
+    for _, name in ipairs({'T0', 'T1', 'T2'}) do
+        -- Each goal starts from the same scene configuration, independent of the previous test.
+        local ok, result = pcall(function()
+            local p = name == 'T0' and self.startPosition
+                or sim.getObjectPosition(sim.getObject('/Anatomy_V0/target_' .. name), self.anatomy)
+            assert(p[3] > 0, 'Goal anatomical Z must be positive')
+            self:message(string.format('%s commanded position: [%.6f, %.6f, %.6f] mm.',
+                name, 1000*p[1], 1000*p[2], 1000*p[3]))
+            sim.setObjectPose(self.target,
+                self.modules.Trajectory.poseAt(1, 1, p, p), self.anatomy)
+            local candidate = savedQ
+            if name ~= 'T0' then
+                local flags
+                candidate, flags = self.ikSolver:solveCandidate()
+                if candidate == nil then
+                    return {valid = false, reason = 'IK failed; flags=' .. tostring(flags)}
+                end
+            end
+            -- Identical arguments check limits only; this is not a motion from T0.
+            local jointsValid, jointReason = self.validator:checkJoints(candidate, candidate)
+            if not jointsValid then return {valid = false, reason = jointReason} end
+            self.robot:setConfiguration(candidate)
+            local rcm, tipError, wall, onShaft, wallCollision = self.validator:measureState(0)
+            local obstacle, obstacleCollision = self.validator:measureObstacle(0)
+            local valid, reason = self.validator:checkState()
+            self:message(name .. ' RCM=' .. mm(rcm) .. '; tip-to-goal=' .. mm(tipError)
+                .. '; RCM on physical shaft=' .. tostring(onShaft))
+            self:message(name .. ' shaft-wall=' .. mm(wall)
+                .. '; minimum=' .. mm(config.minClearance)
+                .. '; robot-wall collision=' .. tostring(wallCollision))
+            self:message(name .. ' shaft-obstacle=' .. mm(obstacle)
+                .. '; minimum=' .. mm(config.minObstacleClearance)
+                .. '; robot-obstacle collision=' .. tostring(obstacleCollision))
+            local qText = {}
+            for i, v in ipairs(candidate) do qText[i] = string.format('%.17g', v) end
+            self:message(name .. ' static configuration (rad): {' .. table.concat(qText, ', ') .. '}')
+            return {valid = valid, reason = reason}
+        end)
+        restore() -- Also required on an IK/measurement exception.
+        if not ok then error(result, 0) end
+        if result.valid then accepted = accepted + 1 end
+        self:message(name .. ' STATIC PREFLIGHT: ' .. (result.valid and 'ACCEPTED' or 'REJECTED')
+            .. '; ' .. (result.reason or 'State checks passed.'))
+    end
+    self:message(string.format(
+        'ENDPOINT PREFLIGHT: %d/3 accepted. One configuration per position; no path tested.', accepted))
+    return accepted == 3
+end
+
 function Experiment:initialize()
     local sim = self.sim
     local config = self.config
@@ -391,6 +484,18 @@ function Experiment:initialize()
     )
 
     self.ikSolver:initialize(self.tip, self.target)
+
+    -- Run before the normal initial-state gate so all three endpoints are reported.
+    if config.diagnosticEndpoints == true then
+        self.diagnosticOnly = true
+        self.running = false
+        local ok, result = pcall(function() return self:diagnoseEndpoints() end)
+        if not ok then
+            sim.addLog(sim.verbosity_errors, 'ENDPOINT PREFLIGHT ERROR: ' .. tostring(result))
+        end
+        sim.stopSimulation()
+        return
+    end
 
     local valid, reason = self.validator:checkState()
     if not valid then

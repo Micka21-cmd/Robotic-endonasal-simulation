@@ -4,8 +4,8 @@
 local Config = {}
 
 function Config.create(projectRoot)
-    local targetName = 'T2'
-    local executionMode = 'rrt_replay'
+    local targetName = 'T1'
+    local executionMode = 'rrt_star_replay'
 
     assert(
         targetName == 'T1' or targetName == 'T2',
@@ -25,7 +25,7 @@ function Config.create(projectRoot)
         targetPath = '/Anatomy_V0/target_' .. targetName,
         startPosition = {0, 0, 0.075},
 
-        runLabel = 'V0_B_O1_' .. targetName,
+        runLabel = 'V0_B_O2_' .. targetName,
 
         method = ({
             prescribed_motion = 'prescribed_motion_ik',
@@ -34,7 +34,7 @@ function Config.create(projectRoot)
             rrt_star_replay = 'rrt_star_task_space_ik',
         })[executionMode],
 
-        runNote = 'CMP01; scenario=V0_B_O1_T2; target=T2; planner=RRT; seed=999983; budget=50',
+        runNote = 'O2 feasibility; target=T1; planner=RRTstar; seed=42; budget=50',
         duration = 16,
 
         maxRcmError = 0.0001,
@@ -61,17 +61,18 @@ function Config.create(projectRoot)
         rrtExtensionM = 0.001,
         rrtGoalBias = 0.15,
         rrtMaxIterations = 50,
-        rrtSeed = 999983,
+        rrtSeed = 42,
         rrtStarRadiusMaxM = 0.0015, -- maximum radius : 1,5 mm
         rrtStarGammaM = 0.003,     -- coefficient of decreasing radius : 3 mm
 
         obstacleEnabled = true,
-        obstaclePath = '/Anatomy_V0/Obstacle_O1',
+        obstaclePath = '/Anatomy_V0/Obstacle_O2',
         minObstacleClearance = 0.001,
         executionMode = executionMode,
 
         profilePlanning = true,
         diagnosticGoalT1 = false,
+        diagnosticEndpoints = false,
     }
 end
 
