@@ -1,0 +1,18 @@
+CMP02, V0_B_O2_T1, 10 paired seeds, iteration budget 50.
+Pre-campaign reference commit: 59da78e2cc56827ecbad87abb7c739c986bd496c
+This commit identifies the pre-campaign reference, not a verified execution hash for each run.
+Only explicitly listed CMP02 runs are included; seed 42 and connector development runs are excluded.
+RRT stops at first solution or budget exhaustion; RRT-star uses the full budget. Compute/time budgets are not equal.
+Profiling enabled. Planning wall time includes geometric queries; none is subtracted.
+One waypoint per simulation step is a kinematic replay policy, not physical motion timing.
+CSV checks cover recorded states; they do not establish continuous collision freedom.
+Path lengths are polylines of recorded actual tip positions, not reference positions.
+Equal-cost tolerance for pair counts: 1e-9 mm. No global optimality claim.
+Among jointly successful pairs, RRT-star shorter: 4; equal within tolerance: 5.
+Mean paired length reduction: 7.509165 percent.
+Reduction of mean lengths (different statistic): 8.231519 percent.
+Actual execution order is recorded in paired_comparison.csv.
+All 20 attempts enter success rates and planning-time summaries. Length summaries condition on success.
+Failed paths have NaN lengths, never zero; paired gains require two successful runs.
+Successful runs RRT: 9/10; RRT-star: 9/10. Jointly successful pairs: 9.
+Geometry mesh identity and source-code identity cannot be established from these CSVs alone.

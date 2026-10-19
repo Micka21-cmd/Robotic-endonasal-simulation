@@ -5,7 +5,7 @@ local Config = {}
 
 function Config.create(projectRoot)
     local targetName = 'T1'
-    local executionMode = 'rrt_star_replay'
+    local executionMode = 'rrt_replay'
 
     assert(
         targetName == 'T1' or targetName == 'T2',
@@ -34,7 +34,7 @@ function Config.create(projectRoot)
             rrt_star_replay = 'rrt_star_task_space_ik',
         })[executionMode],
 
-        runNote = 'O2 feasibility; target=T1; planner=RRTstar; seed=42; budget=50',
+        runNote = 'CMP02; scenario=V0_B_O2_T1; target=T1; planner=RRT; seed=999983; budget=50',
         duration = 16,
 
         maxRcmError = 0.0001,
@@ -61,7 +61,7 @@ function Config.create(projectRoot)
         rrtExtensionM = 0.001,
         rrtGoalBias = 0.15,
         rrtMaxIterations = 50,
-        rrtSeed = 42,
+        rrtSeed = 999983,
         rrtStarRadiusMaxM = 0.0015, -- maximum radius : 1,5 mm
         rrtStarGammaM = 0.003,     -- coefficient of decreasing radius : 3 mm
 
