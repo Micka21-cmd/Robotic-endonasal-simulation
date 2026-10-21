@@ -204,7 +204,8 @@ title({'T1/O2: recorded tip path length by paired seed', 'Missing bars: no solut
 for k=find(~any(success,2))'
     text(k,0.15,'Failed','HorizontalAlignment','center');
 end
-legend(cellstr(algorithms),'Location','northwest'); grid on; box off;
+legend({'RRT','RRT*'},'Location','northoutside', ...
+    'Orientation','horizontal','Box','off'); grid on; box off;
 saveFigure(f,outDir,'path_lengths');
 
 % Figure 2: measured planner wall time, not simulation playback duration.
@@ -215,18 +216,20 @@ xticks(1:n); xticklabels(string(seeds)); xtickangle(35);
 xlabel('Random seed'); ylabel('Planning wall time (s)');
 title({'T1/O2: measured planning time (profiling enabled)', ...
     'RRT: first solution or budget exhausted; RRT-star: full 50 iterations'});
-legend(cellstr(algorithms),'Location','northwest'); grid on; box off;
+legend({'RRT','RRT*'},'Location','northoutside', ...
+    'Orientation','horizontal','Box','off'); grid on; box off;
 saveFigure(f,outDir,'planning_times');
 
 % Figure 3: no finite cost is drawn before the first solution.
 f = figure('Color','w','Position',[100 100 1200 650]);
+tl = tiledlayout(2,5,'TileSpacing','compact','Padding','compact');
 for i=1:n
-    subplot(2,5,i);
+    nexttile(tl);
     H = histories{i};
     if isempty(H)
         xlim([0 50]); ylim([3 4.5]); grid on; box off;
         text(25,3.75,'No solution','HorizontalAlignment','center');
-        title(sprintf('Seed %d',seeds(i))); xlabel('Iteration'); ylabel('Best cost (mm)');
+        title(sprintf('Seed %d',seeds(i)));
         continue
     end
     iterations = H.iteration; costs = H.best_cost_m*1000;
@@ -237,9 +240,11 @@ for i=1:n
     plot(H.iteration,H.best_cost_m*1000,'o','MarkerSize',4,'Color',[0.85 0.38 0.10]);
     xlim([0 50]); ylim([3 4.5]); grid on; box off;
     title(sprintf('Seed %d',seeds(i)));
-    xlabel('Iteration'); ylabel('Best cost (mm)');
 end
-sgtitle('RRT-star: best recorded tip-path cost (blank before first solution)');
+xlabel(tl,'Iteration','FontName','Arial','FontSize',16);
+ylabel(tl,'Best recorded tip-path cost (mm)','FontName','Arial','FontSize',16);
+title(tl,'RRT*: best retained cost (blank before first solution)', ...
+    'FontName','Arial','FontSize',18,'FontWeight','normal');
 saveFigure(f,outDir,'cost_histories');
 
 fid = fopen(fullfile(outDir,'analysis_notes.txt'),'w');
@@ -309,6 +314,24 @@ function near(a,b,tol,label)
 end
 
 function saveFigure(f,outDir,name)
+    % Report typography, scoped to this figure (no global MATLAB defaults).
+    % Keep the original canvas sizes and output filenames for Overleaf.
+    if strcmp(name,'cost_histories')
+        tickSize = 14; labelSize = 16; titleSize = 15;
+    else
+        tickSize = 18; labelSize = 20; titleSize = 18;
+    end
+    set(findall(f,'Type','text'),'FontName','Arial','FontSize',titleSize);
+    axesList = findall(f,'Type','axes');
+    for k = 1:numel(axesList)
+        ax = axesList(k);
+        set(ax,'FontName','Arial','FontSize',tickSize,'LineWidth',0.8);
+        set(ax.XLabel,'FontSize',labelSize,'FontWeight','normal');
+        set(ax.YLabel,'FontSize',labelSize,'FontWeight','normal');
+        set(ax.Title,'FontSize',titleSize,'FontWeight','normal');
+    end
+    set(findall(f,'Type','legend'),'FontName','Arial','FontSize',16);
+    drawnow;
     exportgraphics(f,fullfile(outDir,[name '.pdf']),'ContentType','vector');
     exportgraphics(f,fullfile(outDir,[name '.png']),'Resolution',300);
 end
